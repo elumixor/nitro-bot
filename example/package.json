@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "@elumixor/nitro-bot": "link:..",
+    "@elumixor/nitro-client": "link:../../nitro-client",
     "h3": "^1.15.1",
     "nitropack": "^2.11.12",
     "zod": "^4.3.6"

@@ -57,6 +57,37 @@ export default defineEventHandler((event) => {
 });
 ```
 
+### Reusing a schema from `@elumixor/nitro-client`
+
+If you already use [`@elumixor/nitro-client`](https://github.com/elumixor/nitro-client)'s `handler()` (≥ 3.4.0), the body/query schemas it declares are attached to the returned handler. Pass the handler as `from` and the tool input is derived automatically — no duplication:
+
+```ts
+// src/routes/greet.post.ts
+import { tool } from "@elumixor/nitro-bot";
+import { z } from "zod";
+import { handler } from "../utils/handler"; // exports `createHandler()` from nitro-client/server
+
+const greet = handler(
+  {
+    body: {
+      name: z.string().describe("The person to greet."),
+      excited: z.boolean().optional().describe("Use an exclamation mark."),
+    },
+  },
+  ({ body }) => ({ greeting: `Hello, ${body.name}${body.excited ? "!" : "."}` }),
+);
+
+export const definition = tool({
+  name: "greet",
+  description: "Greet someone by name.",
+  from: greet,
+});
+
+export default greet;
+```
+
+`from` reads `inputSchemas: { body, query }` off the handler and merges them into the tool's input shape. `body` keys win on collision. For mixed-method handlers (a single route that reads both body and query), declare `input` explicitly instead.
+
 You get a `/chat` endpoint automatically:
 
 ```bash
