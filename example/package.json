@@ -1,0 +1,14 @@
+{
+  "name": "nitro-bot-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nitro dev --port 3456"
+  },
+  "dependencies": {
+    "@elumixor/nitro-bot": "file:../",
+    "h3": "^1.15.1",
+    "nitropack": "^2.11.12",
+    "zod": "^4.3.6"
+  }
+}
