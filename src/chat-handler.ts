@@ -1,6 +1,7 @@
 import { tool as aiTool, generateText, type LanguageModel, stepCountIs, type ToolSet } from "ai";
-import { defineEventHandler, readValidatedBody } from "h3";
+import { defineEventHandler, getValidatedQuery, readValidatedBody } from "h3";
 import { z } from "zod";
+import type { ChatMethod } from "./config";
 import type { ToolDefinition } from "./tool";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -19,6 +20,8 @@ export type ChatOptions = {
   systemPrompt?: string;
   maxSteps?: number;
   invoke?: InvokeFn;
+  method?: ChatMethod;
+  promptField?: string;
 };
 
 export type ChatResponse = {
@@ -46,14 +49,21 @@ export function createChatHandler(options: ChatOptions) {
   const model: LanguageModel = options.model ?? "anthropic/claude-sonnet-4.6";
   const maxSteps = options.maxSteps ?? 8;
   const system = options.systemPrompt;
+  const method: ChatMethod = options.method ?? "POST";
+  const promptField = options.promptField ?? "message";
   const tools = buildToolSet(options.tools, invoke);
+  const schema = z.object({ [promptField]: z.string() });
 
   return defineEventHandler(async (event) => {
-    const body = await readValidatedBody(event, (data) => z.object({ message: z.string() }).parse(data));
+    const input =
+      method === "GET"
+        ? await getValidatedQuery(event, (data) => schema.parse(data))
+        : await readValidatedBody(event, (data) => schema.parse(data));
+    const prompt = input[promptField] as string;
     const result = await generateText({
       model,
       system,
-      prompt: body.message,
+      prompt,
       tools,
       stopWhen: stepCountIs(maxSteps),
     });

@@ -32,28 +32,38 @@ export default function nitroBotModule(options: NitroBotModuleOptions = {}) {
       console.warn("[nitro-bot] No routes with `export const definition = tool(...)` found in", routesDir);
     }
 
-    const endpoint = await readEndpoint(configFile);
+    const { endpoint, method } = await readChatRouting(configFile);
     const handlerFile = await writeHandlerFile({ buildDir, routes, configFile });
 
-    nitro.options.handlers.push({ route: endpoint, method: "post", handler: handlerFile });
+    nitro.options.handlers.push({ route: endpoint, method: method.toLowerCase(), handler: handlerFile });
 
     nitro.hooks.hook("compiled", () => {
-      console.log(`[nitro-bot] ${routes.length} tool(s) mounted at POST ${endpoint}`);
+      console.log(`[nitro-bot] ${routes.length} tool(s) mounted at ${method} ${endpoint}`);
     });
   };
 }
 
-async function readEndpoint(configFile: string): Promise<string> {
-  if (!existsSync(configFile)) return "/chat";
+type Routing = { endpoint: string; method: "GET" | "POST" };
+
+async function readChatRouting(configFile: string): Promise<Routing> {
+  const defaults: Routing = { endpoint: "/chat", method: "POST" };
+  if (!existsSync(configFile)) return defaults;
   try {
     const { createJiti } = await import("jiti");
     const jiti = createJiti(configFile, { interopDefault: true });
-    const mod = (await jiti.import(configFile)) as { default?: { endpoint?: string }; endpoint?: string };
+    const mod = (await jiti.import(configFile)) as {
+      default?: { endpoint?: string; method?: string };
+      endpoint?: string;
+      method?: string;
+    };
     const config = mod.default ?? mod;
-    return config.endpoint ?? "/chat";
+    return {
+      endpoint: config.endpoint ?? defaults.endpoint,
+      method: (config.method?.toUpperCase() as Routing["method"]) ?? defaults.method,
+    };
   } catch (error) {
-    console.warn("[nitro-bot] Failed to load", configFile, "— falling back to /chat.", error);
-    return "/chat";
+    console.warn("[nitro-bot] Failed to load", configFile, "— falling back to POST /chat.", error);
+    return defaults;
   }
 }
 

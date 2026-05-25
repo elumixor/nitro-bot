@@ -31,6 +31,8 @@ import { defineChatConfig } from "@elumixor/nitro-bot";
 
 export default defineChatConfig({
   endpoint: "/chat",
+  method: "POST",        // or "GET"
+  promptField: "message", // request field carrying the user prompt
   systemPrompt: "You are a concise assistant. Use the provided tools when they cover what the user asks.",
 });
 ```
@@ -68,9 +70,25 @@ curl -X POST localhost:3000/chat \
 `chat.config.ts` accepts:
 
 - `endpoint` (default `"/chat"`)
+- `method` — `"POST"` (default) or `"GET"`
+- `promptField` — name of the body/query field that carries the prompt (default `"message"`)
 - `systemPrompt`
 - `model` — any AI SDK `LanguageModel` (default `"anthropic/claude-sonnet-4.6"` via the Vercel AI Gateway)
 - `maxSteps` (default `8`)
+
+So the default request is:
+
+```bash
+curl -X POST localhost:3000/chat \
+  -H 'content-type: application/json' \
+  -d '{"message":"..."}'
+```
+
+If you set `method: "GET"` with `promptField: "q"`:
+
+```bash
+curl -G 'http://localhost:3000/chat' --data-urlencode 'q=...'
+```
 
 Set `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or your provider's key in your environment.
 
