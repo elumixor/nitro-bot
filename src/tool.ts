@@ -2,15 +2,6 @@ import type { z } from "zod";
 
 export const TOOL_BRAND = Symbol.for("nitro-bot.tool");
 
-export type SchemaShape = Record<string, z.ZodType>;
-
-export type HandlerWithSchemas = {
-  inputSchemas?: {
-    body?: SchemaShape;
-    query?: SchemaShape;
-  };
-};
-
 export type ToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
   readonly [TOOL_BRAND]: true;
   name: string;
@@ -20,37 +11,17 @@ export type ToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
 
 export type ToolInput<T> = T extends ToolDefinition<infer I> ? I : never;
 
-type ExplicitInput<I extends z.ZodRawShape> = {
+export function tool<I extends z.ZodRawShape = Record<string, never>>(def: {
   name: string;
   description: string;
   input?: I;
-  from?: never;
-};
-
-type DerivedInput = {
-  name: string;
-  description: string;
-  from: HandlerWithSchemas;
-  input?: never;
-};
-
-export function tool<I extends z.ZodRawShape>(def: ExplicitInput<I>): ToolDefinition<I>;
-export function tool(def: DerivedInput): ToolDefinition;
-export function tool<I extends z.ZodRawShape>(def: ExplicitInput<I> | DerivedInput): ToolDefinition {
-  const input = def.input ?? deriveFromHandler(def.from) ?? {};
+}): ToolDefinition<I> {
   return {
     [TOOL_BRAND]: true,
     name: def.name,
     description: def.description,
-    input: input as z.ZodRawShape,
+    input: def.input ?? ({} as I),
   };
-}
-
-function deriveFromHandler(handler: HandlerWithSchemas | undefined): z.ZodRawShape | undefined {
-  if (!handler?.inputSchemas) return undefined;
-  const { body, query } = handler.inputSchemas;
-  if (!body && !query) return {};
-  return { ...(query ?? {}), ...(body ?? {}) };
 }
 
 export function isToolDefinition(value: unknown): value is ToolDefinition {

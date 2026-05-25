@@ -59,15 +59,20 @@ export default defineEventHandler((event) => {
 
 ### Reusing a schema from `@elumixor/nitro-client`
 
-If you already use [`@elumixor/nitro-client`](https://github.com/elumixor/nitro-client)'s `handler()` (≥ 3.4.0), the body/query schemas it declares are attached to the returned handler. Pass the handler as `from` and the tool input is derived automatically — no duplication:
+If your default export is a call whose first argument is an object literal with `body` and/or `query` keys (the shape used by [`@elumixor/nitro-client`](https://github.com/elumixor/nitro-client)'s `handler()`), the discovery scanner pulls that schema out at build time and uses it as the tool's input — you don't need to repeat it on `tool()`:
 
 ```ts
 // src/routes/greet.post.ts
 import { tool } from "@elumixor/nitro-bot";
 import { z } from "zod";
-import { handler } from "../utils/handler"; // exports `createHandler()` from nitro-client/server
+import { handler } from "../utils/handler"; // nitro-client's createHandler()
 
-const greet = handler(
+export const definition = tool({
+  name: "greet",
+  description: "Greet someone by name.",
+});
+
+export default handler(
   {
     body: {
       name: z.string().describe("The person to greet."),
@@ -76,17 +81,9 @@ const greet = handler(
   },
   ({ body }) => ({ greeting: `Hello, ${body.name}${body.excited ? "!" : "."}` }),
 );
-
-export const definition = tool({
-  name: "greet",
-  description: "Greet someone by name.",
-  from: greet,
-});
-
-export default greet;
 ```
 
-`from` reads `inputSchemas: { body, query }` off the handler and merges them into the tool's input shape. `body` keys win on collision. For mixed-method handlers (a single route that reads both body and query), declare `input` explicitly instead.
+How it works: nitro-bot parses each tool-marked route file with `ts-morph`. If the default export is `handler(SCHEMA, fn)` and `SCHEMA.body` / `SCHEMA.query` are object literals, the literal source is copied into the generated chat handler and used as the tool input — body and query are merged with body winning on collision. The `z` identifier (and any other identifier in the literal) must be importable from `zod`; non-zod helpers won't resolve. For those cases, pass `input` explicitly on `tool()` instead — explicit `input` always wins over auto-detection.
 
 You get a `/chat` endpoint automatically:
 

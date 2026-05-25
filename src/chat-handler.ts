@@ -10,6 +10,7 @@ export type ToolRoute = {
   method: HttpMethod;
   path: string;
   module: { definition: ToolDefinition };
+  autoInput?: z.ZodRawShape;
 };
 
 export type InvokeFn = (route: ToolRoute, input: unknown) => unknown | Promise<unknown>;
@@ -32,11 +33,13 @@ export type ChatResponse = {
 export function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet {
   const entries = routes.map((route) => {
     const { definition } = route.module;
+    const inputShape =
+      Object.keys(definition.input).length > 0 ? definition.input : (route.autoInput ?? definition.input);
     return [
       definition.name,
       aiTool({
         description: definition.description,
-        inputSchema: z.object(definition.input),
+        inputSchema: z.object(inputShape),
         execute: async (input: unknown) => invoke(route, input),
       }),
     ] as const;
