@@ -1,10 +1,10 @@
 # Example
 
-Tiny Nitro app demonstrating `@elumixor/nitro-bot`.
+Nitro app demonstrating `@elumixor/nitro-bot`. No hand-written chat route — the module discovers tool-marked routes and mounts `/chat` automatically.
 
 ```bash
 bun install
-export AI_GATEWAY_API_KEY=...   # or ANTHROPIC_API_KEY=...
+export AI_GATEWAY_API_KEY=...   # or set in example/.env
 bun run dev
 ```
 
@@ -13,5 +13,3 @@ curl -X POST localhost:3456/chat \
   -H 'content-type: application/json' \
   -d '{"message":"what is the weather in tokyo, and what is 17 + 4?"}'
 ```
-
-You should see a single response that calls `get_weather` and `add` and summarises the result.

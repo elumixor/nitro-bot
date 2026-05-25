@@ -26,7 +26,8 @@
     "release:major": "npm version major -m \"Release v%s\" && git push --tags"
   },
   "dependencies": {
-    "ai": "^5.0.0"
+    "ai": "^5.0.0",
+    "jiti": "^2.7.0"
   },
   "peerDependencies": {
     "h3": ">=1.0.0",
