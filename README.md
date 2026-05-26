@@ -210,30 +210,44 @@ The response includes the actual step count:
 
 If the model hits `maxSteps`, you'll still get whatever text it produced on the last step (it can't make another tool call). Pick a value that's comfortably above your typical depth — tight limits silently truncate complex queries.
 
-## Telegram
+## Chat platforms (Telegram, Slack, Discord, ...)
 
-Set `TELEGRAM_BOT_TOKEN` in your environment and a Telegram bot starts automatically alongside the HTTP endpoint — same agent, same tools.
+Bring any [Chat SDK](https://www.npmjs.com/package/chat) adapter into your `chat.config.ts`. Whatever you put under `adapters` is started alongside the HTTP `/chat` endpoint, and routed through the same agent.
 
-```env
-# .env
-TELEGRAM_BOT_TOKEN=123456:ABCdef...
+```bash
+bun add @chat-adapter/telegram   # or @chat-adapter/slack, @chat-adapter/discord, ...
 ```
 
 ```ts
-// chat.config.ts — telegram block is optional, env var alone is enough
-defineChatConfig({
+// chat.config.ts
+import { defineChatConfig } from "@elumixor/nitro-bot";
+import { createTelegramAdapter } from "@chat-adapter/telegram";
+import { createSlackAdapter } from "@chat-adapter/slack";
+
+export default defineChatConfig({
   systemPrompt: "...",
-  telegram: {
-    // webhookPath: "/telegram/webhook", // omit for long polling (default)
+  adapters: {
+    telegram: createTelegramAdapter({ mode: "polling" }), // reads TELEGRAM_BOT_TOKEN
+    slack: createSlackAdapter(),                          // reads SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
+  },
+  webhooks: {
+    // optional — map adapter name to webhook route
+    // telegram: "/telegram/webhook",
+    slack: "/slack/events",
   },
 });
 ```
 
-Local dev → long polling. Add `webhookPath` for production HTTPS; nitro-bot mounts a `POST <webhookPath>` route that delegates to the Chat SDK. Register the webhook URL with Telegram once (via [`setWebhook`](https://core.telegram.org/bots/api#setwebhook)) pointing at your public domain plus that path.
+For each entry in `webhooks`, nitro-bot mounts a `POST <path>` route that delegates to the matching `bot.webhooks.<name>(request)` of the Chat SDK. Adapters without a webhook entry run in their long-running mode (e.g. Telegram polling).
 
-The bot responds to DMs and `@`-mentions, and stays subscribed to the thread after the first reply.
+The bot responds to DMs and `@`-mentions, and stays subscribed to the thread after the first reply. Available adapters: `telegram`, `slack`, `discord`, `teams`, `gchat`, `github`, `linear`, `whatsapp`.
 
-Powered by [`chat`](https://www.npmjs.com/package/chat) + [`@chat-adapter/telegram`](https://www.npmjs.com/package/@chat-adapter/telegram) — other adapters (Slack, Discord, Teams, ...) drop in the same way; integration is on the roadmap.
+State defaults to in-memory (subscriptions reset on restart). Pass a persistent state for production:
+
+```ts
+import { createRedisState } from "@chat-adapter/state-redis";
+defineChatConfig({ adapters: { ... }, state: createRedisState() });
+```
 
 ## What's next
 

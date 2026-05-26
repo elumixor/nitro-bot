@@ -23,15 +23,15 @@ export type NitroBotModuleOptions = {
 type Routing = {
   endpoint: string;
   source: "query" | "json" | "form";
-  hasTelegram: boolean;
-  telegramWebhookPath?: string;
+  adapterNames: string[];
+  webhooks: Record<string, string>;
 };
 
 export default function nitroBotModule(options: NitroBotModuleOptions = {}) {
   return async (nitro: NitroLike) => {
     const rootDir = nitro.options.rootDir;
     const srcDir = nitro.options.srcDir ?? rootDir;
-    const buildDir = nitro.options.buildDir ?? resolve(rootDir, ".nitro");
+    const buildDir = resolve(rootDir, ".nitro-bot");
     const routesDir = resolve(srcDir, "routes");
     const configFile = resolve(rootDir, options.configFile ?? "chat.config.ts");
 
@@ -46,17 +46,13 @@ export default function nitroBotModule(options: NitroBotModuleOptions = {}) {
     const handlerFile = await writeHandlerFile({ buildDir, routes, configFile });
     nitro.options.handlers.push({ route: routing.endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
 
-    if (routing.hasTelegram) {
-      const pluginFile = await writeTelegramPlugin({ buildDir, handlerFile });
+    if (routing.adapterNames.length > 0) {
+      const pluginFile = await writeBotPlugin({ buildDir, handlerFile });
       nitro.options.plugins.push(pluginFile);
 
-      if (routing.telegramWebhookPath) {
-        const webhookFile = await writeTelegramWebhook({ buildDir, handlerFile });
-        nitro.options.handlers.push({
-          route: routing.telegramWebhookPath,
-          method: "post",
-          handler: webhookFile,
-        });
+      for (const [adapterName, webhookPath] of Object.entries(routing.webhooks)) {
+        const webhookFile = await writeWebhookRoute({ buildDir, adapterName });
+        nitro.options.handlers.push({ route: webhookPath, method: "post", handler: webhookFile });
       }
     }
 
@@ -64,12 +60,10 @@ export default function nitroBotModule(options: NitroBotModuleOptions = {}) {
       const lines = [
         `[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${routing.endpoint} (source: ${routing.source})`,
       ];
-      if (routing.hasTelegram) {
-        lines.push(
-          routing.telegramWebhookPath
-            ? `[nitro-bot] Telegram webhook at POST ${routing.telegramWebhookPath}`
-            : `[nitro-bot] Telegram long-polling enabled`,
-        );
+      if (routing.adapterNames.length > 0) {
+        lines.push(`[nitro-bot] Chat adapters: ${routing.adapterNames.join(", ")}`);
+        for (const [name, path] of Object.entries(routing.webhooks))
+          lines.push(`[nitro-bot]   ${name} webhook at POST ${path}`);
       }
       for (const line of lines) console.log(line);
     });
@@ -77,24 +71,29 @@ export default function nitroBotModule(options: NitroBotModuleOptions = {}) {
 }
 
 async function readChatRouting(configFile: string): Promise<Routing> {
-  const defaults: Routing = { endpoint: "/chat", source: "json", hasTelegram: false };
+  const defaults: Routing = { endpoint: "/chat", source: "json", adapterNames: [], webhooks: {} };
   if (!existsSync(configFile)) return defaults;
   try {
     const { createJiti } = await import("jiti");
     const jiti = createJiti(configFile, { interopDefault: true });
     const mod = (await jiti.import(configFile)) as {
-      default?: { endpoint?: string; source?: Routing["source"]; telegram?: { webhookPath?: string } };
+      default?: {
+        endpoint?: string;
+        source?: Routing["source"];
+        adapters?: Record<string, unknown>;
+        webhooks?: Record<string, string>;
+      };
       endpoint?: string;
       source?: Routing["source"];
-      telegram?: { webhookPath?: string };
+      adapters?: Record<string, unknown>;
+      webhooks?: Record<string, string>;
     };
     const config = mod.default ?? mod;
-    const telegramToken = config.telegram !== undefined || process.env.TELEGRAM_BOT_TOKEN;
     return {
       endpoint: config.endpoint ?? defaults.endpoint,
       source: config.source ?? defaults.source,
-      hasTelegram: Boolean(telegramToken),
-      telegramWebhookPath: config.telegram?.webhookPath,
+      adapterNames: Object.keys(config.adapters ?? {}),
+      webhooks: config.webhooks ?? {},
     };
   } catch (error) {
     console.warn("[nitro-bot] Failed to load", configFile, "— falling back to POST JSON /chat.", error);
@@ -109,9 +108,8 @@ type WriteOptions = {
 };
 
 async function writeHandlerFile({ buildDir, routes, configFile }: WriteOptions): Promise<string> {
-  const dir = resolve(buildDir, "nitro-bot");
-  await mkdir(dir, { recursive: true });
-  const handlerFile = resolve(dir, "chat-handler.ts");
+  await mkdir(buildDir, { recursive: true });
+  const handlerFile = resolve(buildDir, "chat-handler.ts");
 
   const needsZodImport = routes.some((route) => route.schema);
 
@@ -171,40 +169,37 @@ export default createChatHandler({
   return handlerFile;
 }
 
-async function writeTelegramPlugin({
-  buildDir,
-  handlerFile,
-}: {
-  buildDir: string;
-  handlerFile: string;
-}): Promise<string> {
-  const dir = resolve(buildDir, "nitro-bot");
-  const pluginFile = resolve(dir, "telegram-plugin.ts");
+async function writeBotPlugin({ buildDir, handlerFile }: { buildDir: string; handlerFile: string }): Promise<string> {
+  const pluginFile = resolve(buildDir, "bot-plugin.ts");
   const handlerImport = handlerFile.replace(/\.ts$/, "");
 
   const source = `// Generated by @elumixor/nitro-bot — do not edit.
+import type { Chat } from "chat";
 import { defineNitroPlugin } from "nitropack/runtime";
-import { buildToolSet, createTelegramBot, defaultInvoke } from "@elumixor/nitro-bot";
+import { buildToolSet, createChatBot, defaultInvoke } from "@elumixor/nitro-bot";
 import { chatConfig, toolRoutes } from ${JSON.stringify(handlerImport)};
 
-let bot: ReturnType<typeof createTelegramBot> | undefined;
+let bot: Chat | undefined;
 
-export function getTelegramBot() {
+export function getChatBot(): Chat {
   if (!bot) {
     const tools = buildToolSet(toolRoutes, defaultInvoke);
-    bot = createTelegramBot({
+    bot = createChatBot({
       tools,
       model: chatConfig.model,
       systemPrompt: chatConfig.systemPrompt,
       maxSteps: chatConfig.maxSteps,
-      telegram: chatConfig.telegram,
+      userName: chatConfig.userName,
+      adapters: chatConfig.adapters ?? {},
+      state: chatConfig.state,
     });
+    bot.registerSingleton();
   }
   return bot;
 }
 
 export default defineNitroPlugin(async (nitroApp) => {
-  const instance = getTelegramBot();
+  const instance = getChatBot();
   await instance.initialize();
   nitroApp.hooks.hook("close", async () => {
     await instance.shutdown();
@@ -216,29 +211,28 @@ export default defineNitroPlugin(async (nitroApp) => {
   return pluginFile;
 }
 
-async function writeTelegramWebhook({
+async function writeWebhookRoute({
   buildDir,
-  handlerFile,
+  adapterName,
 }: {
   buildDir: string;
-  handlerFile: string;
+  adapterName: string;
 }): Promise<string> {
-  const dir = resolve(buildDir, "nitro-bot");
-  const webhookFile = resolve(dir, "telegram-webhook.ts");
-  const pluginImport = resolve(dir, "telegram-plugin").replace(/\.ts$/, "");
-  // We must not import the plugin file directly to avoid double registration.
-  // Instead, reuse its exported getTelegramBot accessor.
+  const webhookFile = resolve(buildDir, `webhook-${adapterName}.ts`);
+  const pluginImport = resolve(buildDir, "bot-plugin").replace(/\.ts$/, "");
+
   const source = `// Generated by @elumixor/nitro-bot — do not edit.
 import { defineEventHandler, toWebRequest } from "h3";
-import { getTelegramBot } from ${JSON.stringify(pluginImport)};
+import { getChatBot } from ${JSON.stringify(pluginImport)};
 
 export default defineEventHandler(async (event) => {
-  const bot = getTelegramBot();
+  const bot = getChatBot();
+  const webhooks = bot.webhooks as Record<string, (request: Request) => Promise<Response>>;
+  const handler = webhooks[${JSON.stringify(adapterName)}];
+  if (!handler) throw new Error("nitro-bot: no webhook handler for adapter " + ${JSON.stringify(adapterName)});
   const request = toWebRequest(event);
-  const response = await bot.webhooks.telegram(request);
-  return response;
+  return await handler(request);
 });
-// handlerFile reference (for build dep tracking): ${JSON.stringify(handlerFile)}
 `;
 
   await writeFile(webhookFile, source, "utf8");

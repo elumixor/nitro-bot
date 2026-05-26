@@ -6,6 +6,7 @@
     "dev": "nitro dev --port 3456"
   },
   "dependencies": {
+    "@chat-adapter/telegram": "^4.29.0",
     "@elumixor/nitro-bot": "link:..",
     "@elumixor/nitro-client": "link:../../nitro-client",
     "h3": "^1.15.1",

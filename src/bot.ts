@@ -1,30 +1,23 @@
 import { createMemoryState } from "@chat-adapter/state-memory";
-import { createTelegramAdapter } from "@chat-adapter/telegram";
 import type { LanguageModel, ToolSet } from "ai";
-import { Chat } from "chat";
+import { type Adapter, Chat, type StateAdapter } from "chat";
 import { runAgent } from "./agent";
-import type { TelegramConfig } from "./config";
 
-export type TelegramBotOptions = {
-  telegram?: TelegramConfig;
+export type ChatBotOptions = {
+  adapters: Record<string, Adapter>;
   tools: ToolSet;
   model: LanguageModel;
   systemPrompt?: string;
   maxSteps?: number;
+  userName?: string;
+  state?: StateAdapter;
 };
 
-export function createTelegramBot(options: TelegramBotOptions) {
-  const tg = options.telegram ?? {};
-  const adapter = createTelegramAdapter({
-    botToken: tg.token,
-    secretToken: tg.secretToken,
-    mode: tg.webhookPath ? "webhook" : "polling",
-  });
-
+export function createChatBot(options: ChatBotOptions): Chat {
   const bot = new Chat({
-    userName: "nitro-bot",
-    adapters: { telegram: adapter },
-    state: createMemoryState(),
+    userName: options.userName ?? "nitro-bot",
+    adapters: options.adapters,
+    state: options.state ?? createDefaultState(),
   });
 
   const reply = async (
@@ -52,4 +45,8 @@ export function createTelegramBot(options: TelegramBotOptions) {
   bot.onSubscribedMessage(reply);
 
   return bot;
+}
+
+function createDefaultState(): StateAdapter {
+  return createMemoryState();
 }

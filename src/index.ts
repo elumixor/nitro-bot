@@ -1,4 +1,5 @@
 export { type RunAgentOptions, type RunAgentResult, runAgent } from "./agent";
+export { type ChatBotOptions, createChatBot } from "./bot";
 export {
   buildToolSet,
   type ChatOptions,
@@ -15,9 +16,7 @@ export {
   type RequestSource,
   type ResolvedChatConfig,
   resolveChatConfig,
-  type TelegramConfig,
 } from "./config";
 export { type DiscoveredRoute, discoverToolRoutes } from "./discover";
 export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-module";
-export { createTelegramBot, type TelegramBotOptions } from "./telegram";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
