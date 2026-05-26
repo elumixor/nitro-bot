@@ -39,12 +39,26 @@ export function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet {
       definition.name,
       aiTool({
         description: definition.description,
-        inputSchema: z.object(inputShape),
+        inputSchema: z.object(llmSafeShape(inputShape)),
         execute: async (input: unknown) => invoke(route, input),
       }),
     ] as const;
   });
   return Object.fromEntries(entries) as ToolSet;
+}
+
+function llmSafeShape(shape: z.ZodRawShape): z.ZodRawShape {
+  const out: Record<string, z.ZodType> = {};
+  for (const [key, schema] of Object.entries(shape)) out[key] = toNullableIfOptional(schema as z.ZodType);
+  return out;
+}
+
+function toNullableIfOptional(schema: z.ZodType): z.ZodType {
+  type V4Internal = { _zod?: { def?: { type?: string; innerType?: z.ZodType } } };
+  const internal = schema as unknown as V4Internal;
+  if (internal._zod?.def?.type !== "optional") return schema;
+  const inner = internal._zod.def.innerType;
+  return inner ? inner.nullable() : schema;
 }
 
 export function createChatHandler(options: ChatOptions) {

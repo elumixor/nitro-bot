@@ -46,6 +46,28 @@ function scriptedModel(steps: StepResponse[]): LanguageModel & { calls: Language
   return Object.assign(model, { calls });
 }
 
+describe("LLM-safe schema rewriting", () => {
+  test("optional fields are exposed as nullable on the tool's input schema", () => {
+    const route: ToolRoute = {
+      method: "POST",
+      path: "/x",
+      module: {
+        definition: tool({
+          name: "x",
+          description: "x",
+          input: { required: z.string(), maybe: z.string().optional() },
+        }),
+      },
+    };
+    const tools = buildToolSet([route], () => ({ ok: true }));
+    const schema = tools.x?.inputSchema as z.ZodObject<z.ZodRawShape>;
+
+    expect(schema.parse({ required: "ok", maybe: null })).toEqual({ required: "ok", maybe: null });
+    expect(schema.parse({ required: "ok", maybe: "hi" })).toEqual({ required: "ok", maybe: "hi" });
+    expect(() => schema.parse({ required: "ok" })).toThrow();
+  });
+});
+
 describe("agent loop with a scripted model", () => {
   test("calls the tool's invoke with the parsed input, then summarises the result", async () => {
     const calls: Array<{ route: ToolRoute; input: unknown }> = [];
