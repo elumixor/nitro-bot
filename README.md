@@ -210,6 +210,31 @@ The response includes the actual step count:
 
 If the model hits `maxSteps`, you'll still get whatever text it produced on the last step (it can't make another tool call). Pick a value that's comfortably above your typical depth — tight limits silently truncate complex queries.
 
+## Telegram
+
+Set `TELEGRAM_BOT_TOKEN` in your environment and a Telegram bot starts automatically alongside the HTTP endpoint — same agent, same tools.
+
+```env
+# .env
+TELEGRAM_BOT_TOKEN=123456:ABCdef...
+```
+
+```ts
+// chat.config.ts — telegram block is optional, env var alone is enough
+defineChatConfig({
+  systemPrompt: "...",
+  telegram: {
+    // webhookPath: "/telegram/webhook", // omit for long polling (default)
+  },
+});
+```
+
+Local dev → long polling. Add `webhookPath` for production HTTPS; nitro-bot mounts a `POST <webhookPath>` route that delegates to the Chat SDK. Register the webhook URL with Telegram once (via [`setWebhook`](https://core.telegram.org/bots/api#setwebhook)) pointing at your public domain plus that path.
+
+The bot responds to DMs and `@`-mentions, and stays subscribed to the thread after the first reply.
+
+Powered by [`chat`](https://www.npmjs.com/package/chat) + [`@chat-adapter/telegram`](https://www.npmjs.com/package/@chat-adapter/telegram) — other adapters (Slack, Discord, Teams, ...) drop in the same way; integration is on the roadmap.
+
 ## What's next
 
-Streaming, subagents, file attachments, and chat-platform adapters (Telegram / Slack / Discord) are on the roadmap.
+Streaming, subagents, file attachments, and more chat-platform adapters (Slack / Discord / Teams) are on the roadmap.

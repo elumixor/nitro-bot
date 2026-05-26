@@ -1,6 +1,7 @@
-import { tool as aiTool, generateText, type LanguageModel, stepCountIs, type ToolSet } from "ai";
+import { tool as aiTool, type LanguageModel, type ToolSet } from "ai";
 import { defineEventHandler, getValidatedQuery, readFormData, readValidatedBody } from "h3";
 import { z } from "zod";
+import { runAgent } from "./agent";
 import type { RequestSource } from "./config";
 import type { ToolDefinition } from "./tool";
 
@@ -72,14 +73,8 @@ export function createChatHandler(options: ChatOptions) {
 
   return defineEventHandler(async (event) => {
     const prompt = await readPrompt(event, source, field);
-    const result = await generateText({
-      model,
-      system,
-      prompt,
-      tools,
-      stopWhen: stepCountIs(maxSteps),
-    });
-    const response: ChatResponse = { text: result.text, steps: result.steps?.length ?? 0 };
+    const result = await runAgent({ prompt, tools, model, systemPrompt: system, maxSteps });
+    const response: ChatResponse = { text: result.text, steps: result.steps };
     return response;
   });
 }
@@ -108,7 +103,7 @@ async function readPrompt(
 
 type NitroFetch = (path: string, opts: { method: HttpMethod; query?: unknown; body?: unknown }) => Promise<unknown>;
 
-function defaultInvoke(route: ToolRoute, input: unknown): Promise<unknown> {
+export function defaultInvoke(route: ToolRoute, input: unknown): Promise<unknown> {
   const fetcher = (globalThis as { $fetch?: NitroFetch }).$fetch;
   if (!fetcher)
     return Promise.reject(new Error("Global $fetch unavailable. Pass a custom `invoke` to createChatHandler."));

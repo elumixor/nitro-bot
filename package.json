@@ -26,7 +26,10 @@
     "release:major": "npm version major -m \"Release v%s\" && git push --tags"
   },
   "dependencies": {
+    "@chat-adapter/state-memory": "^4.29.0",
+    "@chat-adapter/telegram": "^4.29.0",
     "ai": "^5.0.0",
+    "chat": "^4.29.0",
     "jiti": "^2.7.0",
     "ts-morph": "^28.0.0"
   },
