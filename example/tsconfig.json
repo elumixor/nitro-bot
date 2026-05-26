@@ -3,7 +3,9 @@
   "compilerOptions": {
     "paths": {
       "zod": ["./node_modules/zod"],
-      "zod/*": ["./node_modules/zod/*"]
+      "zod/*": ["./node_modules/zod/*"],
+      "chat": ["./node_modules/chat"],
+      "chat/*": ["./node_modules/chat/*"]
     }
   }
 }
