@@ -9,8 +9,8 @@ export {
 } from "./chat-handler";
 export {
   type ChatConfig,
-  type ChatMethod,
   defineChatConfig,
+  type RequestSource,
   type ResolvedChatConfig,
   resolveChatConfig,
 } from "./config";

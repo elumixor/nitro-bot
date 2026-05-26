@@ -31,8 +31,8 @@ import { defineChatConfig } from "@elumixor/nitro-bot";
 
 export default defineChatConfig({
   endpoint: "/chat",
-  method: "POST",        // or "GET"
-  promptField: "message", // request field carrying the user prompt
+  source: "json",   // "query" | "json" | "form"
+  field: "message", // name of the field carrying the user prompt
   systemPrompt: "You are a concise assistant. Use the provided tools when they cover what the user asks.",
 });
 ```
@@ -98,25 +98,21 @@ curl -X POST localhost:3000/chat \
 `chat.config.ts` accepts:
 
 - `endpoint` (default `"/chat"`)
-- `method` — `"POST"` (default) or `"GET"`
-- `promptField` — name of the body/query field that carries the prompt (default `"message"`)
+- `source` — where the prompt comes from: `"json"` (default), `"query"`, or `"form"`
+- `field` — the name of that field (default `"message"`)
 - `systemPrompt`
 - `model` — any AI SDK `LanguageModel` (default `"anthropic/claude-sonnet-4.6"` via the Vercel AI Gateway)
 - `maxSteps` (default `8`)
 
-So the default request is:
+`source` also determines the HTTP method: `"query"` → `GET`, `"json"` / `"form"` → `POST`.
 
-```bash
-curl -X POST localhost:3000/chat \
-  -H 'content-type: application/json' \
-  -d '{"message":"..."}'
-```
+| `source` | Method | How to call |
+| --- | --- | --- |
+| `"json"` (default) | `POST` | `curl -X POST localhost:3000/chat -H 'content-type: application/json' -d '{"message":"..."}'` |
+| `"query"` | `GET` | `curl -G 'http://localhost:3000/chat' --data-urlencode 'message=...'` |
+| `"form"` | `POST` | `curl -X POST localhost:3000/chat -F 'message=...'` |
 
-If you set `method: "GET"` with `promptField: "q"`:
-
-```bash
-curl -G 'http://localhost:3000/chat' --data-urlencode 'q=...'
-```
+In each case, replace `message` with whatever you set `field` to.
 
 ## Providers & env vars
 

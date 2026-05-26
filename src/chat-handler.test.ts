@@ -141,6 +141,50 @@ describe("createChatHandler end-to-end", () => {
     expect(calls[0]?.input).toEqual({ city: "Berlin" });
   });
 
+  test("reads the prompt from the query string when source is 'query'", async () => {
+    const model = scriptedModel([{ content: [{ type: "text", text: "ok" }], finishReason: "stop" }]);
+    const handler = createChatHandler({
+      tools: [weatherRoute],
+      model,
+      source: "query",
+      field: "q",
+      invoke: () => ({ unused: true }),
+    });
+
+    const app = createApp();
+    app.use("/chat", handler);
+    const fetchHandler = toWebHandler(app);
+
+    const response = await fetchHandler(new Request("http://localhost/chat?q=hello%20there", { method: "GET" }));
+
+    expect(response.status).toBe(200);
+    const promptArg = (model.calls[0]?.prompt as Array<{ content: Array<{ text?: string }> }>)?.[0]?.content?.[0]?.text;
+    expect(promptArg).toBe("hello there");
+  });
+
+  test("reads the prompt from multipart form data when source is 'form'", async () => {
+    const model = scriptedModel([{ content: [{ type: "text", text: "ok" }], finishReason: "stop" }]);
+    const handler = createChatHandler({
+      tools: [weatherRoute],
+      model,
+      source: "form",
+      field: "prompt",
+      invoke: () => ({ unused: true }),
+    });
+
+    const app = createApp();
+    app.use("/chat", handler);
+    const fetchHandler = toWebHandler(app);
+
+    const form = new FormData();
+    form.append("prompt", "from a form");
+    const response = await fetchHandler(new Request("http://localhost/chat", { method: "POST", body: form }));
+
+    expect(response.status).toBe(200);
+    const promptArg = (model.calls[0]?.prompt as Array<{ content: Array<{ text?: string }> }>)?.[0]?.content?.[0]?.text;
+    expect(promptArg).toBe("from a form");
+  });
+
   test("rejects requests missing the configured prompt field", async () => {
     const handler = createChatHandler({
       tools: [weatherRoute],

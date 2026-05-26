@@ -1,7 +1,7 @@
 import { tool as aiTool, generateText, type LanguageModel, stepCountIs, type ToolSet } from "ai";
-import { defineEventHandler, getValidatedQuery, readValidatedBody } from "h3";
+import { defineEventHandler, getValidatedQuery, readFormData, readValidatedBody } from "h3";
 import { z } from "zod";
-import type { ChatMethod } from "./config";
+import type { RequestSource } from "./config";
 import type { ToolDefinition } from "./tool";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -21,8 +21,8 @@ export type ChatOptions = {
   systemPrompt?: string;
   maxSteps?: number;
   invoke?: InvokeFn;
-  method?: ChatMethod;
-  promptField?: string;
+  source?: RequestSource;
+  field?: string;
 };
 
 export type ChatResponse = {
@@ -52,17 +52,12 @@ export function createChatHandler(options: ChatOptions) {
   const model: LanguageModel = options.model ?? "anthropic/claude-sonnet-4.6";
   const maxSteps = options.maxSteps ?? 8;
   const system = options.systemPrompt;
-  const method: ChatMethod = options.method ?? "POST";
-  const promptField = options.promptField ?? "message";
+  const source: RequestSource = options.source ?? "json";
+  const field = options.field ?? "message";
   const tools = buildToolSet(options.tools, invoke);
-  const schema = z.object({ [promptField]: z.string() });
 
   return defineEventHandler(async (event) => {
-    const input =
-      method === "GET"
-        ? await getValidatedQuery(event, (data) => schema.parse(data))
-        : await readValidatedBody(event, (data) => schema.parse(data));
-    const prompt = input[promptField] as string;
+    const prompt = await readPrompt(event, source, field);
     const result = await generateText({
       model,
       system,
@@ -73,6 +68,28 @@ export function createChatHandler(options: ChatOptions) {
     const response: ChatResponse = { text: result.text, steps: result.steps?.length ?? 0 };
     return response;
   });
+}
+
+async function readPrompt(
+  event: Parameters<Parameters<typeof defineEventHandler>[0]>[0],
+  source: RequestSource,
+  field: string,
+): Promise<string> {
+  if (source === "query") {
+    const schema = z.object({ [field]: z.string() });
+    const data = await getValidatedQuery(event, (raw) => schema.parse(raw));
+    return data[field] as string;
+  }
+  if (source === "form") {
+    const form = await readFormData(event);
+    const value = form.get(field);
+    if (typeof value !== "string" || value.length === 0)
+      throw Object.assign(new Error(`Form field '${field}' is required.`), { statusCode: 400 });
+    return value;
+  }
+  const schema = z.object({ [field]: z.string() });
+  const data = await readValidatedBody(event, (raw) => schema.parse(raw));
+  return data[field] as string;
 }
 
 type NitroFetch = (path: string, opts: { method: HttpMethod; query?: unknown; body?: unknown }) => Promise<unknown>;

@@ -1,6 +1,6 @@
 import { tool } from "@elumixor/nitro-bot";
+import { handler } from "@elumixor/nitro-client/server";
 import { z } from "zod";
-import { handler } from "../utils/handler";
 
 export const definition = tool({
   name: "greet",

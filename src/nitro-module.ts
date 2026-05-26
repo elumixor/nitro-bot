@@ -32,37 +32,38 @@ export default function nitroBotModule(options: NitroBotModuleOptions = {}) {
       console.warn("[nitro-bot] No routes with `export const definition = tool(...)` found in", routesDir);
     }
 
-    const { endpoint, method } = await readChatRouting(configFile);
+    const { endpoint, source } = await readChatRouting(configFile);
+    const httpMethod = source === "query" ? "GET" : "POST";
     const handlerFile = await writeHandlerFile({ buildDir, routes, configFile });
 
-    nitro.options.handlers.push({ route: endpoint, method: method.toLowerCase(), handler: handlerFile });
+    nitro.options.handlers.push({ route: endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
 
     nitro.hooks.hook("compiled", () => {
-      console.log(`[nitro-bot] ${routes.length} tool(s) mounted at ${method} ${endpoint}`);
+      console.log(`[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source})`);
     });
   };
 }
 
-type Routing = { endpoint: string; method: "GET" | "POST" };
+type Routing = { endpoint: string; source: "query" | "json" | "form" };
 
 async function readChatRouting(configFile: string): Promise<Routing> {
-  const defaults: Routing = { endpoint: "/chat", method: "POST" };
+  const defaults: Routing = { endpoint: "/chat", source: "json" };
   if (!existsSync(configFile)) return defaults;
   try {
     const { createJiti } = await import("jiti");
     const jiti = createJiti(configFile, { interopDefault: true });
     const mod = (await jiti.import(configFile)) as {
-      default?: { endpoint?: string; method?: string };
+      default?: { endpoint?: string; source?: Routing["source"] };
       endpoint?: string;
-      method?: string;
+      source?: Routing["source"];
     };
     const config = mod.default ?? mod;
     return {
       endpoint: config.endpoint ?? defaults.endpoint,
-      method: (config.method?.toUpperCase() as Routing["method"]) ?? defaults.method,
+      source: config.source ?? defaults.source,
     };
   } catch (error) {
-    console.warn("[nitro-bot] Failed to load", configFile, "— falling back to POST /chat.", error);
+    console.warn("[nitro-bot] Failed to load", configFile, "— falling back to POST JSON /chat.", error);
     return defaults;
   }
 }
