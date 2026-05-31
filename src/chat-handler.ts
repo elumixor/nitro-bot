@@ -1,5 +1,12 @@
 import { tool as aiTool, type LanguageModel, type ToolSet } from "ai";
-import { defineEventHandler, type EventHandler, type H3Event, getValidatedQuery, readFormData, readValidatedBody } from "h3";
+import {
+  defineEventHandler,
+  type EventHandler,
+  getValidatedQuery,
+  type H3Event,
+  readFormData,
+  readValidatedBody,
+} from "h3";
 import { z } from "zod";
 import { runAgent } from "./agent";
 import { getBotContext } from "./als";
@@ -155,7 +162,15 @@ function createSyntheticEvent(): H3Event {
     Object.assign(baseContext, ctx.context);
   }
   const req = { headers: {}, method: "POST", url: "/", on: noop };
-  const res = { on: noop, once: noop, end: noop, setHeader: noop, getHeader: () => undefined, statusCode: 200, headersSent: false };
+  const res = {
+    on: noop,
+    once: noop,
+    end: noop,
+    setHeader: noop,
+    getHeader: () => undefined,
+    statusCode: 200,
+    headersSent: false,
+  };
   return {
     node: { req, res },
     context: baseContext,

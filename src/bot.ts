@@ -1,9 +1,9 @@
+import { TelegramRenderer } from "@elumixor/react-telegram";
 import type { LanguageModel, ModelMessage, ToolSet } from "ai";
 import type { Context } from "grammy";
 import { createElement } from "react";
-import { TelegramRenderer } from "@elumixor/react-telegram";
-import { AgentReply } from "./agent-reply";
 import type { TelegramBotConfig } from "./adapters/telegram";
+import { AgentReply } from "./agent-reply";
 import { botContextStorage } from "./als";
 import type { BotContext, BotPostFn, BotPreFn } from "./types";
 
@@ -22,7 +22,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
   const { botConfig, pre, post, tools, chatConfig } = options;
   const { bot, draftStreaming = true } = botConfig;
 
-  return defineNitroPlugin(async (nitroApp) => {
+  return defineNitroPlugin((nitroApp) => {
     bot.on("message:text", async (ctx) => {
       const botCtx = buildBotContext(ctx, botConfig);
       if (!botCtx) return;
@@ -40,8 +40,10 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
       }
 
       // react-telegram's TelegramRenderer reads `draftStreaming` off the options bag but
-       // declares the parameter as the base RendererOptions; cast to satisfy strict TS.
-      const renderer = new TelegramRenderer(ctx, { draftStreaming } as ConstructorParameters<typeof TelegramRenderer>[1]);
+      // declares the parameter as the base RendererOptions; cast to satisfy strict TS.
+      const renderer = new TelegramRenderer(ctx, { draftStreaming } as ConstructorParameters<
+        typeof TelegramRenderer
+      >[1]);
 
       // Carry the bot context through any tool invocations on this turn. Tools read it
       // via `event.context.*` (see generated bot-context middleware) or `getBotContext()`.

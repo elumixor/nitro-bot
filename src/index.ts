@@ -1,6 +1,6 @@
 export { defineTelegramBot, type TelegramBotConfig } from "./adapters/telegram";
-export { getBotContext } from "./als";
 export { type RunAgentOptions, type RunAgentResult, runAgent } from "./agent";
+export { getBotContext } from "./als";
 export {
   buildToolSet,
   type ChatOptions,
