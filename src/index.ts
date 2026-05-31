@@ -1,6 +1,15 @@
-export { defineTelegramBot, type TelegramBotConfig } from "./adapters/telegram";
+export {
+  defineTelegramBot,
+  type TelegramBotConfig,
+  type TelegramBotInfo,
+  type TelegramWebhookConfig,
+} from "./adapters/telegram";
 export { type RunAgentOptions, type RunAgentResult, runAgent } from "./agent";
 export { getBotContext } from "./als";
+export { type AnyBotTool, type BotToolDefinition, botTool, buildBotToolSet, isBotToolDefinition } from "./bot-tool";
+export { sendFileBuiltin } from "./builtins";
+export { type BotCommandDef, botCommand, type CommandContext } from "./command";
+export { type BotEntry, getBot, registerBot } from "./registry";
 export {
   buildToolSet,
   type ChatOptions,
@@ -26,5 +35,6 @@ export {
   type BotPreFn,
   botPost,
   botPre,
+  type ChatReply,
   type NitroBotContext,
 } from "./types";

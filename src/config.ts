@@ -9,13 +9,16 @@ export type ChatConfig = {
   field?: string;
   model?: LanguageModel;
   maxSteps?: number;
+  /** System prompt for the HTTP `/chat` endpoint. (Bots set their own via pre-middleware.) */
+  systemPrompt?: string;
   /** Directory scanned for bot definitions. Defaults to `src/bots`. */
   botsDir?: string;
 };
 
 export type ResolvedChatConfig = Required<
   Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir">
->;
+> &
+  Pick<ChatConfig, "systemPrompt">;
 
 export const DEFAULT_CONFIG: ResolvedChatConfig = {
   endpoint: "/chat",

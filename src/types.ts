@@ -31,6 +31,13 @@ declare module "h3" {
  */
 export interface NitroBotContext extends Record<string, unknown> {}
 
+/** Chat-platform side effects a bot-local tool can trigger (sending files/photos to the thread). */
+export type ChatReply = {
+  sendDocument: (data: Uint8Array | Buffer, filename: string, caption?: string) => Promise<void>;
+  sendPhoto: (data: Uint8Array | Buffer, caption?: string) => Promise<void>;
+  sendText: (text: string) => Promise<void>;
+};
+
 export type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
   bot: { name: string; username?: string };
   message: { text: string; id: number; replyToId?: number };
@@ -48,8 +55,13 @@ export type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
   };
   agent: {
     messages: ModelMessage[];
+    /** Set this in pre-middleware (`ctx.agent.systemPrompt = "..."`) — passed to the model as the
+     *  dedicated `system` prompt, never interleaved into `messages`. */
+    systemPrompt?: string;
     result?: { text: string; steps: number };
   };
+  /** Send files/photos/text to the current thread. Available inside bot-local tools and middleware. */
+  reply: ChatReply;
   context: C;
 };
 
