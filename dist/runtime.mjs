@@ -187,30 +187,7 @@ function startTelegramBot(options) {
         });
       }
     });
-    const me = await bot.api.getMe();
-    const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
-    if (namedCommands.length > 0)
-      await bot.api.setMyCommands(namedCommands.map((c) => ({ command: c.name, description: c.description }))).catch((err) => console.error("[nitro-bot] setMyCommands failed:", err));
-    if (onStart) await onStart({ bot, info });
     let closing = false;
-    if (webhook) {
-      const handleUpdate = webhookCallback(bot, "std/http", { secretToken: webhook.secret });
-      await bot.init();
-      registerBot(registryName, { bot, handleUpdate });
-      await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
-    } else {
-      registerBot(registryName, { bot });
-      await bot.api.deleteWebhook();
-      void bot.start().then(() => {
-        if (!closing) {
-          console.error("[nitro-bot] polling stopped unexpectedly \u2014 exiting.");
-          process.exit(1);
-        }
-      }).catch((err) => {
-        console.error("[nitro-bot] bot.start failed \u2014 exiting.", err);
-        process.exit(1);
-      });
-    }
     nitroApp.hooks.hook("close", async () => {
       closing = true;
       if (webhook) await bot.api.deleteWebhook().catch(() => {
@@ -218,6 +195,29 @@ function startTelegramBot(options) {
       else await bot.stop().catch(() => {
       });
     });
+    try {
+      const me = await bot.api.getMe();
+      const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
+      if (namedCommands.length > 0)
+        await bot.api.setMyCommands(namedCommands.map((c) => ({ command: c.name, description: c.description }))).catch((err) => console.error("[nitro-bot] setMyCommands failed:", err));
+      if (onStart) await onStart({ bot, info });
+      if (webhook) {
+        if (!/^https:\/\//i.test(webhook.url))
+          throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
+        const handleUpdate = webhookCallback(bot, "std/http", { secretToken: webhook.secret });
+        await bot.init();
+        registerBot(registryName, { bot, handleUpdate });
+        await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
+      } else {
+        registerBot(registryName, { bot });
+        await bot.api.deleteWebhook();
+        void bot.start().then(() => {
+          if (!closing) console.error("[nitro-bot] polling stopped unexpectedly.");
+        }).catch((err) => console.error("[nitro-bot] bot.start failed:", err));
+      }
+    } catch (err) {
+      console.error("[nitro-bot] bot startup failed \u2014 HTTP server stays up, bot disabled:", err);
+    }
   });
 }
 function buildBotContext(ctx, config) {

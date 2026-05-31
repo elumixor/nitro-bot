@@ -133,47 +133,49 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
       }
     });
 
-    const me = await bot.api.getMe();
-    const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
-
-    if (namedCommands.length > 0)
-      await bot.api
-        .setMyCommands(namedCommands.map((c) => ({ command: c.name, description: c.description })))
-        .catch((err) => console.error("[nitro-bot] setMyCommands failed:", err));
-
-    if (onStart) await onStart({ bot, info });
-
     let closing = false;
-
-    if (webhook) {
-      const handleUpdate = webhookCallback(bot, "std/http", { secretToken: webhook.secret });
-      await bot.init();
-      registerBot(registryName, { bot, handleUpdate });
-      await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
-    } else {
-      registerBot(registryName, { bot });
-      await bot.api.deleteWebhook();
-      // bot.start() resolves when polling stops. If that happens while we're NOT shutting down, the
-      // bot died fatally — don't leave a zombie server, exit so the supervisor (Fly) restarts it.
-      void bot
-        .start()
-        .then(() => {
-          if (!closing) {
-            console.error("[nitro-bot] polling stopped unexpectedly — exiting.");
-            process.exit(1);
-          }
-        })
-        .catch((err) => {
-          console.error("[nitro-bot] bot.start failed — exiting.", err);
-          process.exit(1);
-        });
-    }
 
     nitroApp.hooks.hook("close", async () => {
       closing = true;
       if (webhook) await bot.api.deleteWebhook().catch(() => {});
       else await bot.stop().catch(() => {});
     });
+
+    // The bot shares this process with the host's HTTP API. Bringing the bot up must NEVER crash the
+    // server — a bad token, a non-https/unreachable webhook URL, or any Telegram error would otherwise
+    // take the whole API down. Log and keep serving; the webhook receiver route is mounted separately,
+    // so incoming updates still work once the URL is registered.
+    try {
+      const me = await bot.api.getMe();
+      const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
+
+      if (namedCommands.length > 0)
+        await bot.api
+          .setMyCommands(namedCommands.map((c) => ({ command: c.name, description: c.description })))
+          .catch((err) => console.error("[nitro-bot] setMyCommands failed:", err));
+
+      if (onStart) await onStart({ bot, info });
+
+      if (webhook) {
+        if (!/^https:\/\//i.test(webhook.url))
+          throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
+        const handleUpdate = webhookCallback(bot, "std/http", { secretToken: webhook.secret });
+        await bot.init();
+        registerBot(registryName, { bot, handleUpdate });
+        await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
+      } else {
+        registerBot(registryName, { bot });
+        await bot.api.deleteWebhook();
+        void bot
+          .start()
+          .then(() => {
+            if (!closing) console.error("[nitro-bot] polling stopped unexpectedly.");
+          })
+          .catch((err) => console.error("[nitro-bot] bot.start failed:", err));
+      }
+    } catch (err) {
+      console.error("[nitro-bot] bot startup failed — HTTP server stays up, bot disabled:", err);
+    }
   });
 }
 
