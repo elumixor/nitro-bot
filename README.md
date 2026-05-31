@@ -6,7 +6,7 @@ Auto-generate an LLM chat-bot endpoint from your existing Nitro routes.
 
 1. Install the package and enable the Nitro module.
 2. Mark any route that the LLM may call as a tool, by adding `export const definition = tool({...})`.
-3. Optionally drop a `chat.config.ts` next to your `nitro.config.ts` with the system prompt and other settings.
+3. Pass config (system prompt, adapters, etc.) directly to `nitroBotModule({...})` in `nitro.config.ts`.
 
 That's it. On dev/build the module scans your `routes/` directory, finds the tool markers, and mounts a chat endpoint (default `/chat`) that lets an LLM call those routes via Nitro's in-process `$fetch`.
 
@@ -21,19 +21,14 @@ bun add @elumixor/nitro-bot
 import { nitroBotModule } from "@elumixor/nitro-bot";
 
 export default defineNitroConfig({
-  modules: [nitroBotModule()],
-});
-```
-
-```ts
-// chat.config.ts (optional)
-import { defineChatConfig } from "@elumixor/nitro-bot";
-
-export default defineChatConfig({
-  endpoint: "/chat",
-  source: "json",   // "query" | "json" | "form"
-  field: "message", // name of the field carrying the user prompt
-  systemPrompt: "You are a concise assistant. Use the provided tools when they cover what the user asks.",
+  modules: [
+    nitroBotModule({
+      endpoint: "/chat",
+      source: "json",   // "query" | "json" | "form"
+      field: "message", // name of the field carrying the user prompt
+      systemPrompt: "You are a concise assistant. Use the provided tools when they cover what the user asks.",
+    }),
+  ],
 });
 ```
 
@@ -95,7 +90,7 @@ curl -X POST localhost:3000/chat \
 
 ## Configuration
 
-`chat.config.ts` accepts:
+`nitroBotModule({...})` accepts:
 
 - `endpoint` (default `"/chat"`)
 - `source` — where the prompt comes from: `"json"` (default), `"query"`, or `"form"`
@@ -121,7 +116,7 @@ In each case, replace `message` with whatever you set `field` to.
 ### 1. Gateway string (default)
 
 ```ts
-defineChatConfig({ model: "anthropic/claude-sonnet-4.6" });
+nitroBotModule({ model: "anthropic/claude-sonnet-4.6" });
 ```
 
 Routed through the Vercel AI Gateway, which abstracts over Anthropic, OpenAI, Google, etc. and gives you per-model fallback + observability. Requires `AI_GATEWAY_API_KEY` in your environment (or the auto-injected `VERCEL_OIDC_TOKEN` when deployed on Vercel).
@@ -131,25 +126,9 @@ Routed through the Vercel AI Gateway, which abstracts over Anthropic, OpenAI, Go
 AI_GATEWAY_API_KEY=sk-...
 ```
 
-### 2. Provider instance
+### 2. Direct provider
 
-Install the provider package you want and pass an instance. No gateway involved — calls go straight to the provider.
-
-```bash
-bun add @ai-sdk/anthropic     # or @ai-sdk/openai, @ai-sdk/google, ...
-```
-
-```ts
-// chat.config.ts
-import { defineChatConfig } from "@elumixor/nitro-bot";
-import { anthropic } from "@ai-sdk/anthropic";
-
-export default defineChatConfig({
-  model: anthropic("claude-sonnet-4-5-20250929"),
-});
-```
-
-Each provider auto-reads its own env var:
+To skip the gateway, install a provider package and pass its env var:
 
 | Provider package | Env var |
 | --- | --- |
@@ -160,25 +139,7 @@ Each provider auto-reads its own env var:
 | `@ai-sdk/groq` | `GROQ_API_KEY` |
 | Gateway string | `AI_GATEWAY_API_KEY` |
 
-### Custom env var or runtime key
-
-If your key lives under a different env var (or you load it from a secret manager), build the provider yourself with the `create*` helper:
-
-```ts
-import { defineChatConfig } from "@elumixor/nitro-bot";
-import { createAnthropic } from "@ai-sdk/anthropic";
-
-const anthropic = createAnthropic({
-  apiKey: process.env.MY_ANTHROPIC_KEY,
-  // baseURL: "https://proxy.example.com/v1", // optional override
-});
-
-export default defineChatConfig({
-  model: anthropic("claude-sonnet-4-5-20250929"),
-});
-```
-
-Same pattern works for `createOpenAI`, `createGoogleGenerativeAI`, `createGateway`, etc.
+Then pass `model` as a string in the AI SDK's `provider/model` form — `nitroBotModule({...})` config is serialized into a generated runtime file at build time, so values must be plain data. For provider instances built via `createAnthropic({ apiKey: ... })` and similar, construct them inside a route or your own runtime module instead of the module config.
 
 ### Where to set the env var
 
@@ -212,42 +173,50 @@ If the model hits `maxSteps`, you'll still get whatever text it produced on the 
 
 ## Chat platforms (Telegram, Slack, Discord, ...)
 
-Bring any [Chat SDK](https://www.npmjs.com/package/chat) adapter into your `chat.config.ts`. Whatever you put under `adapters` is started alongside the HTTP `/chat` endpoint, and routed through the same agent.
+Bring any [Chat SDK](https://www.npmjs.com/package/chat) adapter into your module config. Everything in `adapters` is started alongside the HTTP `/chat` endpoint and routed through the same agent.
 
 ```bash
 bun add @chat-adapter/telegram   # or @chat-adapter/slack, @chat-adapter/discord, ...
 ```
 
 ```ts
-// chat.config.ts
-import { defineChatConfig } from "@elumixor/nitro-bot";
-import { createTelegramAdapter } from "@chat-adapter/telegram";
-import { createSlackAdapter } from "@chat-adapter/slack";
+// nitro.config.ts
+import { nitroBotModule, telegramAdapter } from "@elumixor/nitro-bot";
 
-export default defineChatConfig({
-  systemPrompt: "...",
-  adapters: {
-    telegram: createTelegramAdapter({ mode: "polling" }), // reads TELEGRAM_BOT_TOKEN
-    slack: createSlackAdapter(),                          // reads SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
-  },
-  webhooks: {
-    // optional — map adapter name to webhook route
-    // telegram: "/telegram/webhook",
-    slack: "/slack/events",
-  },
+export default defineNitroConfig({
+  modules: [
+    nitroBotModule({
+      systemPrompt: "...",
+      adapters: [
+        telegramAdapter(),                                    // polling (reads TELEGRAM_BOT_TOKEN)
+        // telegramAdapter({ webhookUrl: "https://app.example.com/telegram/webhook" }),
+      ],
+    }),
+  ],
 });
 ```
 
-For each entry in `webhooks`, nitro-bot mounts a `POST <path>` route that delegates to the matching `bot.webhooks.<name>(request)` of the Chat SDK. Adapters without a webhook entry run in their long-running mode (e.g. Telegram polling).
+`telegramAdapter()` with no args runs in long-polling mode. Pass `webhookUrl` to switch to webhook mode — nitro-bot auto-mounts the receiving route at `/telegram/webhook` (override with `webhookPath`).
 
-The bot responds to DMs and `@`-mentions, and stays subscribed to the thread after the first reply. Available adapters: `telegram`, `slack`, `discord`, `teams`, `gchat`, `github`, `linear`, `whatsapp`.
-
-State defaults to in-memory (subscriptions reset on restart). Pass a persistent state for production:
+For other platforms (Slack, Discord, …), use the generic `adapter()` helper until a dedicated wrapper is added:
 
 ```ts
-import { createRedisState } from "@chat-adapter/state-redis";
-defineChatConfig({ adapters: { ... }, state: createRedisState() });
+import { adapter } from "@elumixor/nitro-bot";
+
+adapter({
+  name: "slack",
+  from: "@chat-adapter/slack",
+  factory: "createSlackAdapter",
+  options: { /* whatever createSlackAdapter expects */ },
+  webhookPath: "/slack/events",
+})
 ```
+
+Why the indirection? Adapter instances need to be constructed at runtime, but `nitro.config.ts` is build-time code. The helpers return a serializable descriptor that nitro-bot emits into a generated runtime file.
+
+The bot responds to DMs and `@`-mentions, and stays subscribed to the thread after the first reply. Available chat-adapter packages: `telegram`, `slack`, `discord`, `teams`, `gchat`, `github`, `linear`, `whatsapp`.
+
+State defaults to in-memory (subscriptions reset on restart). Persistent state isn't yet wired through the inline config — drop into a runtime plugin if you need it before that lands.
 
 ## What's next
 

@@ -1,5 +1,5 @@
 import { tool } from "@elumixor/nitro-bot";
-import { defineEventHandler, getQuery } from "h3";
+import { handler } from "@elumixor/nitro-client/server";
 import { z } from "zod";
 
 export const definition = tool({
@@ -15,8 +15,8 @@ const fakeForecast: Record<string, number> = {
   tokyo: 22,
 };
 
-export default defineEventHandler((event) => {
-  const { city } = getQuery(event) as { city?: string };
-  const key = (city ?? "").toLowerCase();
-  return { city: city ?? "", tempCelsius: fakeForecast[key] ?? 20 };
+export default handler({ query: definition.input }, ({ query, event }) => {
+  console.log("[weather] direct invoke?", event.path, "bot:", event.context.bot);
+  const key = query.city.toLowerCase();
+  return { city: query.city, tempCelsius: fakeForecast[key] ?? 20 };
 });

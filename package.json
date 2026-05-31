@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.mts",
+      "default": "./dist/runtime.mjs"
     }
   },
   "files": [
@@ -26,20 +30,24 @@
     "release:major": "npm version major -m \"Release v%s\" && git push --tags"
   },
   "dependencies": {
-    "@chat-adapter/state-memory": "^4.29.0",
+    "@elumixor/react-message-renderer": "^0.2.5",
+    "@elumixor/react-telegram": "^0.2.2",
     "ai": "^5.0.0",
-    "chat": "^4.29.0",
+    "grammy": "^1.42.0",
     "jiti": "^2.7.0",
+    "react": "^19.2.5",
     "ts-morph": "^28.0.0"
   },
   "peerDependencies": {
     "h3": ">=1.0.0",
+    "nitropack": ">=2.0.0",
     "zod": ">=4.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
     "@types/bun": "latest",
     "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
     "h3": "^1.15.1",
     "typescript": "^5.9.3",
     "unbuild": "^3.6.1",

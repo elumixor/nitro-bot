@@ -1,5 +1,6 @@
+export { defineTelegramBot, type TelegramBotConfig } from "./adapters/telegram";
+export { getBotContext } from "./als";
 export { type RunAgentOptions, type RunAgentResult, runAgent } from "./agent";
-export { type ChatBotOptions, createChatBot } from "./bot";
 export {
   buildToolSet,
   type ChatOptions,
@@ -12,7 +13,6 @@ export {
 } from "./chat-handler";
 export {
   type ChatConfig,
-  defineChatConfig,
   type RequestSource,
   type ResolvedChatConfig,
   resolveChatConfig,
@@ -20,3 +20,11 @@ export {
 export { type DiscoveredRoute, discoverToolRoutes } from "./discover";
 export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-module";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
+export {
+  type BotContext,
+  type BotPostFn,
+  type BotPreFn,
+  botPost,
+  botPre,
+  type NitroBotContext,
+} from "./types";

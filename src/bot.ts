@@ -1,52 +1,104 @@
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { LanguageModel, ToolSet } from "ai";
-import { type Adapter, Chat, type StateAdapter } from "chat";
-import { runAgent } from "./agent";
+import type { LanguageModel, ModelMessage, ToolSet } from "ai";
+import type { Context } from "grammy";
+import { createElement } from "react";
+import { TelegramRenderer } from "@elumixor/react-telegram";
+import { AgentReply } from "./agent-reply";
+import type { TelegramBotConfig } from "./adapters/telegram";
+import { botContextStorage } from "./als";
+import type { BotContext, BotPostFn, BotPreFn } from "./types";
 
-export type ChatBotOptions = {
-  adapters: Record<string, Adapter>;
+type NitroApp = { hooks: { hook(name: "close", fn: () => unknown): void } };
+const defineNitroPlugin = <T extends (app: NitroApp) => unknown | Promise<unknown>>(fn: T): T => fn;
+
+export type StartTelegramBotOptions = {
+  botConfig: TelegramBotConfig;
+  pre: BotPreFn[];
+  post: BotPostFn[];
   tools: ToolSet;
-  model: LanguageModel;
-  systemPrompt?: string;
-  maxSteps?: number;
-  userName?: string;
-  state?: StateAdapter;
+  chatConfig: { model: LanguageModel; maxSteps: number };
 };
 
-export function createChatBot(options: ChatBotOptions): Chat {
-  const bot = new Chat({
-    userName: options.userName ?? "nitro-bot",
-    adapters: options.adapters,
-    state: options.state ?? createDefaultState(),
-  });
+export function startTelegramBot(options: StartTelegramBotOptions) {
+  const { botConfig, pre, post, tools, chatConfig } = options;
+  const { bot, draftStreaming = true } = botConfig;
 
-  const reply = async (
-    thread: { post: (msg: string) => Promise<unknown>; startTyping?: () => Promise<unknown> },
-    message: { text?: string },
-  ): Promise<void> => {
-    const prompt = message.text?.trim();
-    if (!prompt) return;
-    await thread.startTyping?.();
-    const result = await runAgent({
-      prompt,
-      tools: options.tools,
-      model: options.model,
-      systemPrompt: options.systemPrompt,
-      maxSteps: options.maxSteps,
+  return defineNitroPlugin(async (nitroApp) => {
+    bot.on("message:text", async (ctx) => {
+      const botCtx = buildBotContext(ctx, botConfig);
+      if (!botCtx) return;
+
+      for (const fn of pre) {
+        const result = await fn(botCtx);
+        if (result === false) return;
+      }
+
+      // Append the current user message if no pre-middleware already did.
+      const messages: ModelMessage[] = [...botCtx.agent.messages];
+      const last = messages[messages.length - 1];
+      if (!last || last.role !== "user" || last.content !== botCtx.message.text) {
+        messages.push({ role: "user", content: botCtx.message.text });
+      }
+
+      // react-telegram's TelegramRenderer reads `draftStreaming` off the options bag but
+       // declares the parameter as the base RendererOptions; cast to satisfy strict TS.
+      const renderer = new TelegramRenderer(ctx, { draftStreaming } as ConstructorParameters<typeof TelegramRenderer>[1]);
+
+      // Carry the bot context through any tool invocations on this turn. Tools read it
+      // via `event.context.*` (see generated bot-context middleware) or `getBotContext()`.
+      await botContextStorage.run(botCtx, () =>
+        renderer.render(
+          createElement(AgentReply, {
+            messages,
+            tools,
+            model: chatConfig.model,
+            maxSteps: chatConfig.maxSteps,
+            onFinish: async (result) => {
+              botCtx.agent.result = result;
+              for (const fn of post) {
+                try {
+                  await fn(botCtx as Parameters<BotPostFn>[0]);
+                } catch (err) {
+                  console.error("[nitro-bot] post-middleware error:", err);
+                }
+              }
+            },
+          }),
+        ),
+      );
     });
-    await thread.post(result.text);
-  };
 
-  bot.onDirectMessage(reply);
-  bot.onNewMention(async (thread, message) => {
-    await thread.subscribe();
-    await reply(thread, message);
+    void bot.start();
+    nitroApp.hooks.hook("close", () => bot.stop());
   });
-  bot.onSubscribedMessage(reply);
-
-  return bot;
 }
 
-function createDefaultState(): StateAdapter {
-  return createMemoryState();
+function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | null {
+  const msg = ctx.message;
+  if (!msg?.text || !ctx.chat || !ctx.from) return null;
+
+  const chatType = ctx.chat.type as BotContext["thread"]["type"];
+  const fallbackName = ctx.me?.first_name ?? "bot";
+
+  return {
+    bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
+    message: {
+      text: msg.text,
+      id: msg.message_id,
+      replyToId: msg.reply_to_message?.message_id,
+    },
+    user: {
+      id: String(ctx.from.id),
+      username: ctx.from.username,
+      firstName: ctx.from.first_name,
+      lastName: ctx.from.last_name,
+      languageCode: ctx.from.language_code,
+    },
+    thread: {
+      id: String(ctx.chat.id),
+      type: chatType,
+      title: "title" in ctx.chat ? ctx.chat.title : undefined,
+    },
+    agent: { messages: [] },
+    context: {},
+  };
 }

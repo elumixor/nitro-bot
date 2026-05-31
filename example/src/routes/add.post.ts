@@ -1,5 +1,5 @@
 import { tool } from "@elumixor/nitro-bot";
-import { defineEventHandler, readBody } from "h3";
+import { handler } from "@elumixor/nitro-client/server";
 import { z } from "zod";
 
 export const definition = tool({
@@ -8,7 +8,7 @@ export const definition = tool({
   input: { a: z.number(), b: z.number() },
 });
 
-export default defineEventHandler(async (event) => {
-  const body = (await readBody(event)) as { a: number; b: number };
+export default handler({ body: definition.input }, ({ body, event }) => {
+  console.log("[add] direct invoke? bot:", event.context.bot);
   return { sum: body.a + body.b };
 });

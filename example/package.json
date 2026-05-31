@@ -6,11 +6,17 @@
     "dev": "nitro dev --port 3456"
   },
   "dependencies": {
-    "@chat-adapter/telegram": "^4.29.0",
     "@elumixor/nitro-bot": "link:..",
     "@elumixor/nitro-client": "link:../../nitro-client",
+    "@elumixor/react-message-renderer": "^0.2.5",
+    "@elumixor/react-telegram": "^0.2.2",
+    "grammy": "^1.42.0",
     "h3": "^1.15.1",
     "nitropack": "^2.11.12",
+    "react": "^19.2.5",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
   }
 }

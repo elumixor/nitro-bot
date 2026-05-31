@@ -93,8 +93,16 @@ function extractHandlerSchema(project: Project, absPath: string): ExtractedSchem
   const bodyText = readPropertyText(bodyProp);
   const queryText = readPropertyText(queryProp);
 
+  // If the schema references `definition.input` (DRY pattern), skip autoInput entirely —
+  // the tool's own definition.input is used at runtime by buildToolSet.
+  if (referencesDefinition(bodyText) || referencesDefinition(queryText)) return undefined;
+
   if (!bodyText && !queryText) return undefined;
   return { bodyText, queryText };
+}
+
+function referencesDefinition(text: string | undefined): boolean {
+  return Boolean(text && /\bdefinition\b/.test(text));
 }
 
 function unwrapCall(expression: Node | undefined): Node | undefined {
