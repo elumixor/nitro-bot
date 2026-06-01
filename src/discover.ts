@@ -11,10 +11,18 @@ export type ExtractedSchema = {
   queryText?: string;
 };
 
+export type RouteParam = {
+  /** The dynamic segment name — `id` for `[id]`, `statusId` for `[statusId]`. */
+  name: string;
+  /** Nearest static path segment before the param — `people` for `people/[id]`. Used in the LLM description. */
+  collection: string;
+};
+
 export type DiscoveredRoute = {
   method: HttpMethod;
   path: string;
   absPath: string;
+  params: RouteParam[];
   schema?: ExtractedSchema;
 };
 
@@ -33,6 +41,7 @@ export async function discoverToolRoutes(routesDir: string): Promise<DiscoveredR
   const project = new Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: false });
   const results: DiscoveredRoute[] = candidates.map((candidate) => ({
     ...candidate,
+    params: paramsFromPath(candidate.path),
     schema: extractHandlerSchema(project, candidate.absPath),
   }));
   results.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
@@ -75,6 +84,24 @@ function routeFromFile(absPath: string, routesDir: string): { method: HttpMethod
   if (path.endsWith("/index")) path = path.slice(0, -"/index".length) || "/";
   path = path.replace(/\[\.\.\.(\w+)\]/g, "**:$1").replace(/\[(\w+)\]/g, ":$1");
   return { method: methodLower.toUpperCase() as HttpMethod, path };
+}
+
+/**
+ * Pull the dynamic segments out of a resolved route path (`/people/:id/status/:statusId`) so they can
+ * be surfaced as LLM tool inputs. Each param is paired with the nearest preceding static segment, which
+ * becomes the human-readable "collection" the param selects from. Catch-all segments (`**:rest`) are
+ * skipped — they capture a path remainder, not a single record, so they don't map cleanly to a tool input.
+ */
+function paramsFromPath(path: string): RouteParam[] {
+  const params: RouteParam[] = [];
+  let collection = "items";
+  for (const segment of path.split("/")) {
+    if (!segment) continue;
+    if (segment.startsWith("**:")) continue;
+    if (segment.startsWith(":")) params.push({ name: segment.slice(1), collection });
+    else collection = segment;
+  }
+  return params;
 }
 
 function extractHandlerSchema(project: Project, absPath: string): ExtractedSchema | undefined {

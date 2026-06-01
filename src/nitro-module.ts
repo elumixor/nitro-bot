@@ -1,7 +1,7 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import type { ChatConfig } from "./config";
-import { type DiscoveredRoute, discoverToolRoutes } from "./discover";
+import { type DiscoveredRoute, discoverToolRoutes, type RouteParam } from "./discover";
 
 type NitroModuleHooks = { hook: (name: string, fn: () => void | Promise<void>) => void };
 
@@ -183,21 +183,26 @@ async function writeHandlerFile({
   configFile: string;
 }): Promise<string> {
   const handlerFile = resolve(buildDir, "chat-handler.ts");
-  const needsZodImport = routes.some((route) => route.schema);
+  const needsZodImport = routes.some((route) => route.params.length > 0 || route.schema);
 
   const imports = routes
     .map((route, index) => `import * as r${index} from ${JSON.stringify(route.absPath.replace(/\.ts$/, ""))};`)
     .join("\n");
 
-  const autoInputDecls = routes
-    .map((route, index) => {
-      if (!route.schema) return "";
-      const { bodyText, queryText } = route.schema;
-      const parts = [queryText, bodyText].filter(Boolean) as string[];
-      const merged = parts.length === 1 ? parts[0] : `{ ${parts.map((p) => `...(${p})`).join(", ")} }`;
-      return `const r${index}_input = ${merged};`;
+  // `_params` (dynamic [id] segments) is kept separate from `_input` (auto-extracted body/query): params are
+  // always merged into the tool schema, whereas body/query auto-input yields to a route's explicit definition.input.
+  const inputDecls = routes
+    .flatMap((route, index) => {
+      const decls: string[] = [];
+      const paramsText = paramsSchemaText(route.params);
+      if (paramsText) decls.push(`const r${index}_params = ${paramsText};`);
+      if (route.schema) {
+        const parts = [route.schema.queryText, route.schema.bodyText].filter(Boolean) as string[];
+        const merged = parts.length === 1 ? parts[0] : `{ ${parts.map((p) => `...(${p})`).join(", ")} }`;
+        decls.push(`const r${index}_input = ${merged};`);
+      }
+      return decls;
     })
-    .filter(Boolean)
     .join("\n");
 
   const toolList = routes
@@ -208,6 +213,10 @@ async function writeHandlerFile({
         `module: r${index}`,
       ];
       if (route.schema) fields.push(`autoInput: r${index}_input`);
+      if (route.params.length > 0) {
+        fields.push(`paramsInput: r${index}_params`);
+        fields.push(`params: ${JSON.stringify(route.params.map((p) => p.name))}`);
+      }
       return `  { ${fields.join(", ")} }`;
     })
     .join(",\n");
@@ -218,7 +227,7 @@ async function writeHandlerFile({
 import { buildToolSet, createChatHandler, defaultInvoke, resolveChatConfig, type ToolRoute } from "@elumixor/nitro-bot";
 ${needsZodImport ? 'import { z } from "zod";\n' : ""}${configImport}
 ${imports}
-${autoInputDecls ? `\n${autoInputDecls}\n` : ""}
+${inputDecls ? `\n${inputDecls}\n` : ""}
 export const chatConfig = resolveChatConfig(userConfig);
 
 export const toolRoutes: ToolRoute[] = [
@@ -235,6 +244,15 @@ export default createChatHandler({
 
   await writeFile(handlerFile, source, "utf8");
   return handlerFile;
+}
+
+/** Build the zod shape source for a route's dynamic segments, e.g. `{ id: z.string().describe("...") }`. */
+function paramsSchemaText(params: RouteParam[]): string | undefined {
+  if (params.length === 0) return undefined;
+  const fields = params
+    .map((p) => `${p.name}: z.string().describe(${JSON.stringify(`Selects a single record from "${p.collection}".`)})`)
+    .join(", ");
+  return `{ ${fields} }`;
 }
 
 async function writeRuntimeFile({ buildDir, handlerFile }: { buildDir: string; handlerFile: string }): Promise<string> {
@@ -287,7 +305,9 @@ async function writeBotPlugin({ buildDir, bot }: { buildDir: string; bot: Discov
 
   const preImports = bot.preFiles.map((f, i) => `import pre_${i} from ${JSON.stringify(stripExt(f))};`).join("\n");
   const postImports = bot.postFiles.map((f, i) => `import post_${i} from ${JSON.stringify(stripExt(f))};`).join("\n");
-  const toolImports = bot.toolFiles.map((f, i) => `import botTool_${i} from ${JSON.stringify(stripExt(f))};`).join("\n");
+  const toolImports = bot.toolFiles
+    .map((f, i) => `import botTool_${i} from ${JSON.stringify(stripExt(f))};`)
+    .join("\n");
   const commandImports = bot.commandFiles
     .map((f, i) => `import command_${i} from ${JSON.stringify(stripExt(f))};`)
     .join("\n");

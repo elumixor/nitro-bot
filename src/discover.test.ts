@@ -8,7 +8,32 @@ describe("discoverToolRoutes against the example app", () => {
   test("finds every tool-marked route and ignores untagged files", async () => {
     const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
     const summary = routes.map((r) => `${r.method} ${r.path}`).sort();
-    expect(summary).toEqual(["GET /weather", "POST /add", "POST /greet"]);
+    expect(summary).toEqual([
+      "DELETE /people/:id",
+      "GET /people",
+      "GET /weather",
+      "PATCH /people/:id/notes/:noteId",
+      "POST /add",
+      "POST /greet",
+    ]);
+  });
+
+  test("extracts dynamic segments as params paired with the nearest static collection", async () => {
+    const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
+
+    const del = routes.find((r) => r.path === "/people/:id" && r.method === "DELETE");
+    expect(del?.params).toEqual([{ name: "id", collection: "people" }]);
+
+    const patch = routes.find((r) => r.path === "/people/:id/notes/:noteId");
+    expect(patch?.params).toEqual([
+      { name: "id", collection: "people" },
+      { name: "noteId", collection: "notes" },
+    ]);
+  });
+
+  test("static routes carry no params", async () => {
+    const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
+    expect(routes.find((r) => r.path === "/weather")?.params).toEqual([]);
   });
 
   test("captures the body schema source from a nitro-client handler default export", async () => {

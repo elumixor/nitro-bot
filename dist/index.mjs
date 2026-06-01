@@ -30,7 +30,8 @@ function botCommand(def) {
 function buildToolSet(routes, invoke) {
   const entries = routes.map((route) => {
     const { definition } = route.module;
-    const inputShape = Object.keys(definition.input).length > 0 ? definition.input : route.autoInput ?? definition.input;
+    const base = Object.keys(definition.input).length > 0 ? definition.input : route.autoInput ?? definition.input;
+    const inputShape = route.paramsInput ? { ...route.paramsInput, ...base } : base;
     return [
       definition.name,
       tool$1({
@@ -88,12 +89,13 @@ async function readPrompt(event, source, field) {
 async function defaultInvoke(route, input) {
   const handler = route.module.default;
   const useQuery = route.method === "GET" || route.method === "DELETE";
+  const { params, rest } = splitParams(input, route.params);
   if (handler && typeof handler.execute === "function") {
-    const event = createSyntheticEvent(route.method);
-    return await handler.execute(event, useQuery ? void 0 : input, useQuery ? input : void 0);
+    const event = createSyntheticEvent(route.method, { params });
+    return await handler.execute(event, useQuery ? void 0 : rest, useQuery ? rest : void 0);
   }
   if (handler) {
-    const event = createSyntheticEvent(route.method, useQuery ? { query: input } : { body: input });
+    const event = createSyntheticEvent(route.method, useQuery ? { params, query: rest } : { params, body: rest });
     return await handler(event);
   }
   const fetcher = globalThis.$fetch;
@@ -102,9 +104,26 @@ async function defaultInvoke(route, input) {
       `[nitro-bot] route ${route.path} has no default handler and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`
     );
   }
-  return fetcher(route.path, {
+  return fetcher(substituteParams(route.path, params), {
     method: route.method,
-    ...useQuery ? { query: input } : { body: input }
+    ...useQuery ? { query: rest } : { body: rest }
+  });
+}
+function splitParams(input, paramNames) {
+  if (!paramNames?.length || !input || typeof input !== "object") return { params: {}, rest: input };
+  const params = {};
+  const rest = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (paramNames.includes(key)) {
+      if (value !== void 0 && value !== null) params[key] = String(value);
+    } else rest[key] = value;
+  }
+  return { params, rest };
+}
+function substituteParams(path, params) {
+  return path.replace(/:(\w+)/g, (whole, name) => {
+    const value = params[name];
+    return value === void 0 ? whole : encodeURIComponent(value);
   });
 }
 function encodeQuery(query) {
@@ -122,6 +141,7 @@ function createSyntheticEvent(method = "POST", payload) {
   };
   const ctx = getBotContext();
   const baseContext = {};
+  if (payload?.params && Object.keys(payload.params).length > 0) baseContext.params = payload.params;
   if (ctx) {
     baseContext.bot = {
       threadId: ctx.thread.id,
@@ -189,6 +209,7 @@ async function discoverToolRoutes(routesDir) {
   const project = new Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: false });
   const results = candidates.map((candidate) => ({
     ...candidate,
+    params: paramsFromPath(candidate.path),
     schema: extractHandlerSchema(project, candidate.absPath)
   }));
   results.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
@@ -228,6 +249,17 @@ function routeFromFile(absPath, routesDir) {
   if (path.endsWith("/index")) path = path.slice(0, -"/index".length) || "/";
   path = path.replace(/\[\.\.\.(\w+)\]/g, "**:$1").replace(/\[(\w+)\]/g, ":$1");
   return { method: methodLower.toUpperCase(), path };
+}
+function paramsFromPath(path) {
+  const params = [];
+  let collection = "items";
+  for (const segment of path.split("/")) {
+    if (!segment) continue;
+    if (segment.startsWith("**:")) continue;
+    if (segment.startsWith(":")) params.push({ name: segment.slice(1), collection });
+    else collection = segment;
+  }
+  return params;
 }
 function extractHandlerSchema(project, absPath) {
   const sourceFile = project.addSourceFileAtPath(absPath);
@@ -379,15 +411,19 @@ async function writeHandlerFile({
   configFile
 }) {
   const handlerFile = resolve(buildDir, "chat-handler.ts");
-  const needsZodImport = routes.some((route) => route.schema);
+  const needsZodImport = routes.some((route) => route.params.length > 0 || route.schema);
   const imports = routes.map((route, index) => `import * as r${index} from ${JSON.stringify(route.absPath.replace(/\.ts$/, ""))};`).join("\n");
-  const autoInputDecls = routes.map((route, index) => {
-    if (!route.schema) return "";
-    const { bodyText, queryText } = route.schema;
-    const parts = [queryText, bodyText].filter(Boolean);
-    const merged = parts.length === 1 ? parts[0] : `{ ${parts.map((p) => `...(${p})`).join(", ")} }`;
-    return `const r${index}_input = ${merged};`;
-  }).filter(Boolean).join("\n");
+  const inputDecls = routes.flatMap((route, index) => {
+    const decls = [];
+    const paramsText = paramsSchemaText(route.params);
+    if (paramsText) decls.push(`const r${index}_params = ${paramsText};`);
+    if (route.schema) {
+      const parts = [route.schema.queryText, route.schema.bodyText].filter(Boolean);
+      const merged = parts.length === 1 ? parts[0] : `{ ${parts.map((p) => `...(${p})`).join(", ")} }`;
+      decls.push(`const r${index}_input = ${merged};`);
+    }
+    return decls;
+  }).join("\n");
   const toolList = routes.map((route, index) => {
     const fields = [
       `method: ${JSON.stringify(route.method)}`,
@@ -395,6 +431,10 @@ async function writeHandlerFile({
       `module: r${index}`
     ];
     if (route.schema) fields.push(`autoInput: r${index}_input`);
+    if (route.params.length > 0) {
+      fields.push(`paramsInput: r${index}_params`);
+      fields.push(`params: ${JSON.stringify(route.params.map((p) => p.name))}`);
+    }
     return `  { ${fields.join(", ")} }`;
   }).join(",\n");
   const configImport = `import userConfig from ${JSON.stringify(configFile.replace(/\.ts$/, ""))};`;
@@ -402,8 +442,8 @@ async function writeHandlerFile({
 import { buildToolSet, createChatHandler, defaultInvoke, resolveChatConfig, type ToolRoute } from "@elumixor/nitro-bot";
 ${needsZodImport ? 'import { z } from "zod";\n' : ""}${configImport}
 ${imports}
-${autoInputDecls ? `
-${autoInputDecls}
+${inputDecls ? `
+${inputDecls}
 ` : ""}
 export const chatConfig = resolveChatConfig(userConfig);
 
@@ -420,6 +460,11 @@ export default createChatHandler({
 `;
   await writeFile(handlerFile, source, "utf8");
   return handlerFile;
+}
+function paramsSchemaText(params) {
+  if (params.length === 0) return void 0;
+  const fields = params.map((p) => `${p.name}: z.string().describe(${JSON.stringify(`Selects a single record from "${p.collection}".`)})`).join(", ");
+  return `{ ${fields} }`;
 }
 async function writeRuntimeFile({ buildDir, handlerFile }) {
   const runtimeFile = resolve(buildDir, "runtime.ts");

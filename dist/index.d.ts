@@ -72,7 +72,12 @@ type ToolRoute = {
     module: {
         definition: ToolDefinition;
     };
+    /** Auto-extracted body/query zod shape. Used only when the tool's own `definition.input` is empty. */
     autoInput?: z.ZodRawShape;
+    /** Zod shape for the dynamic path segments (`[id]`). Always merged into the tool input, even when `definition.input` is set. */
+    paramsInput?: z.ZodRawShape;
+    /** Names of dynamic path segments (`[id]` → `"id"`). Pulled out of the tool input and routed to `event.context.params`. */
+    params?: string[];
 };
 type InvokeFn = (route: ToolRoute, input: unknown) => unknown | Promise<unknown>;
 type ChatOptions = {
@@ -96,10 +101,17 @@ type ExtractedSchema = {
     bodyText?: string;
     queryText?: string;
 };
+type RouteParam = {
+    /** The dynamic segment name — `id` for `[id]`, `statusId` for `[statusId]`. */
+    name: string;
+    /** Nearest static path segment before the param — `people` for `people/[id]`. Used in the LLM description. */
+    collection: string;
+};
 type DiscoveredRoute = {
     method: HttpMethod;
     path: string;
     absPath: string;
+    params: RouteParam[];
     schema?: ExtractedSchema;
 };
 declare function discoverToolRoutes(routesDir: string): Promise<DiscoveredRoute[]>;

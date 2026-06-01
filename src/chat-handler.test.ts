@@ -3,7 +3,7 @@ import type { LanguageModelV2, LanguageModelV2CallOptions, LanguageModelV2Conten
 import { generateText, type LanguageModel, stepCountIs } from "ai";
 import { createApp, toWebHandler } from "h3";
 import { z } from "zod";
-import { buildToolSet, createChatHandler, type ToolRoute } from "./chat-handler";
+import { buildToolSet, createChatHandler, defaultInvoke, type ToolRoute } from "./chat-handler";
 import { tool } from "./tool";
 
 const weatherRoute: ToolRoute = {
@@ -65,6 +65,88 @@ describe("LLM-safe schema rewriting", () => {
     expect(schema.parse({ required: "ok", maybe: null })).toEqual({ required: "ok", maybe: null });
     expect(schema.parse({ required: "ok", maybe: "hi" })).toEqual({ required: "ok", maybe: "hi" });
     expect(() => schema.parse({ required: "ok" })).toThrow();
+  });
+});
+
+describe("paramsInput merging into the tool schema", () => {
+  const paramsInput = { id: z.string().describe('Selects a single record from "people".') };
+
+  test("merges params on top of auto-extracted body/query input", () => {
+    const route: ToolRoute = {
+      method: "PATCH",
+      path: "/people/:id",
+      paramsInput,
+      params: ["id"],
+      autoInput: { name: z.string() },
+      module: { definition: tool({ name: "update_person", description: "x" }) },
+    };
+    const tools = buildToolSet([route], () => ({ ok: true }));
+    const schema = tools.update_person?.inputSchema as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape).sort()).toEqual(["id", "name"]);
+  });
+
+  test("merges params even when the tool defines its own explicit input", () => {
+    const route: ToolRoute = {
+      method: "PATCH",
+      path: "/people/:id",
+      paramsInput,
+      params: ["id"],
+      module: { definition: tool({ name: "update_person", description: "x", input: { email: z.string() } }) },
+    };
+    const tools = buildToolSet([route], () => ({ ok: true }));
+    const schema = tools.update_person?.inputSchema as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape).sort()).toEqual(["email", "id"]);
+  });
+});
+
+describe("defaultInvoke route-param routing", () => {
+  function routeWith(method: ToolRoute["method"], params: string[], handlerFn: (event: unknown) => unknown): ToolRoute {
+    return {
+      method,
+      path: "/people/:id/notes/:noteId",
+      params,
+      module: { definition: tool({ name: "t", description: "t" }), default: handlerFn } as never,
+    };
+  }
+
+  test("PATCH: params go to event.context.params, the rest becomes the body", async () => {
+    let seen: { params: unknown; body: unknown } | undefined;
+    const route = routeWith("PATCH", ["id", "noteId"], (event) => {
+      const e = event as { context: { params?: unknown }; _requestBody?: unknown };
+      seen = { params: e.context.params, body: e._requestBody };
+      return { ok: true };
+    });
+
+    await defaultInvoke(route, { id: "p1", noteId: "n2", text: "hello" });
+
+    expect(seen?.params).toEqual({ id: "p1", noteId: "n2" });
+    expect(seen?.body).toEqual({ text: "hello" });
+  });
+
+  test("DELETE: a param-only input leaves an empty query and still sets params", async () => {
+    let seen: { params: unknown; path: unknown } | undefined;
+    const route = routeWith("DELETE", ["id"], (event) => {
+      const e = event as { context: { params?: unknown }; path?: unknown };
+      seen = { params: e.context.params, path: e.path };
+      return { ok: true };
+    });
+
+    await defaultInvoke(route, { id: "p1" });
+
+    expect(seen?.params).toEqual({ id: "p1" });
+    expect(seen?.path).toBe("/");
+  });
+
+  test("numeric/coerced param values are stringified for the router", async () => {
+    let seen: unknown;
+    const route = routeWith("DELETE", ["id"], (event) => {
+      seen = (event as { context: { params?: unknown } }).context.params;
+      return { ok: true };
+    });
+
+    await defaultInvoke(route, { id: 42 });
+
+    expect(seen).toEqual({ id: "42" });
   });
 });
 

@@ -19,7 +19,12 @@ export type ToolRoute = {
   method: HttpMethod;
   path: string;
   module: { definition: ToolDefinition };
+  /** Auto-extracted body/query zod shape. Used only when the tool's own `definition.input` is empty. */
   autoInput?: z.ZodRawShape;
+  /** Zod shape for the dynamic path segments (`[id]`). Always merged into the tool input, even when `definition.input` is set. */
+  paramsInput?: z.ZodRawShape;
+  /** Names of dynamic path segments (`[id]` → `"id"`). Pulled out of the tool input and routed to `event.context.params`. */
+  params?: string[];
 };
 
 export type InvokeFn = (route: ToolRoute, input: unknown) => unknown | Promise<unknown>;
@@ -42,8 +47,10 @@ export type ChatResponse = {
 export function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet {
   const entries = routes.map((route) => {
     const { definition } = route.module;
-    const inputShape =
-      Object.keys(definition.input).length > 0 ? definition.input : (route.autoInput ?? definition.input);
+    const base = Object.keys(definition.input).length > 0 ? definition.input : (route.autoInput ?? definition.input);
+    // Dynamic-segment params are structural — they belong in the schema regardless of whether the
+    // body/query came from `definition.input` or auto-extraction, so they merge on top of either.
+    const inputShape = route.paramsInput ? { ...route.paramsInput, ...base } : base;
     return [
       definition.name,
       aiTool({
@@ -119,10 +126,14 @@ export async function defaultInvoke(route: ToolRoute, input: unknown): Promise<u
   const handler = (route.module as { default?: ExecutableHandler }).default;
   const useQuery = route.method === "GET" || route.method === "DELETE";
 
+  // Dynamic-segment values (`[id]`) come in mixed with the body/query input. Split them out so they reach
+  // the handler's `router.id` via `event.context.params`, and never leak into body/query validation.
+  const { params, rest } = splitParams(input, route.params);
+
   if (handler && typeof handler.execute === "function") {
     // Legacy fast-path: older nitro-client builds attach `.execute`, which takes pre-parsed body/query.
-    const event = createSyntheticEvent(route.method);
-    return await handler.execute(event, useQuery ? undefined : input, useQuery ? input : undefined);
+    const event = createSyntheticEvent(route.method, { params });
+    return await handler.execute(event, useQuery ? undefined : rest, useQuery ? rest : undefined);
   }
 
   if (handler) {
@@ -133,7 +144,7 @@ export async function defaultInvoke(route: ToolRoute, input: unknown): Promise<u
     // recover it. We deliberately avoid `$fetch`: Nitro's internal fetch dispatches the route in a fresh
     // async context that does NOT carry our ALS store, so `getBotContext()` in the bot-context middleware
     // returned undefined and `event.context.user` silently came through empty.
-    const event = createSyntheticEvent(route.method, useQuery ? { query: input } : { body: input });
+    const event = createSyntheticEvent(route.method, useQuery ? { params, query: rest } : { params, body: rest });
     return await (handler as EventHandler)(event);
   }
 
@@ -144,9 +155,31 @@ export async function defaultInvoke(route: ToolRoute, input: unknown): Promise<u
       `[nitro-bot] route ${route.path} has no default handler and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`,
     );
   }
-  return fetcher(route.path, {
+  return fetcher(substituteParams(route.path, params), {
     method: route.method,
-    ...(useQuery ? { query: input } : { body: input }),
+    ...(useQuery ? { query: rest } : { body: rest }),
+  });
+}
+
+function splitParams(
+  input: unknown,
+  paramNames: string[] | undefined,
+): { params: Record<string, string>; rest: unknown } {
+  if (!paramNames?.length || !input || typeof input !== "object") return { params: {}, rest: input };
+  const params: Record<string, string> = {};
+  const rest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (paramNames.includes(key)) {
+      if (value !== undefined && value !== null) params[key] = String(value);
+    } else rest[key] = value;
+  }
+  return { params, rest };
+}
+
+function substituteParams(path: string, params: Record<string, string>): string {
+  return path.replace(/:(\w+)/g, (whole, name: string) => {
+    const value = params[name];
+    return value === undefined ? whole : encodeURIComponent(value);
   });
 }
 
@@ -166,10 +199,15 @@ function encodeQuery(query: unknown): string {
   return search ? `?${search}` : "";
 }
 
-function createSyntheticEvent(method: HttpMethod = "POST", payload?: { body?: unknown; query?: unknown }): H3Event {
+function createSyntheticEvent(
+  method: HttpMethod = "POST",
+  payload?: { body?: unknown; query?: unknown; params?: Record<string, string> },
+): H3Event {
   const noop = () => {};
   const ctx = getBotContext();
   const baseContext: Record<string, unknown> = {};
+  // h3's getRouterParam (used by nitro-client's `router` proxy) reads from event.context.params.
+  if (payload?.params && Object.keys(payload.params).length > 0) baseContext.params = payload.params;
   if (ctx) {
     baseContext.bot = {
       threadId: ctx.thread.id,
