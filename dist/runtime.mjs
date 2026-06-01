@@ -146,9 +146,6 @@ function startTelegramBot(options) {
     }
     bot.on("message:text", async (ctx) => {
       try {
-        console.error(
-          `[nitro-bot:diag] handler fired update=${ctx.update.update_id} chat=${ctx.chat?.id} thread=${ctx.message?.message_thread_id} msg=${ctx.message?.message_id}`
-        );
         const botCtx = buildBotContext(ctx, botConfig);
         if (!botCtx) return;
         if (botCtx.message.text.startsWith("/")) return;
@@ -196,8 +193,24 @@ function startTelegramBot(options) {
       if (!webhook) await bot.stop().catch(() => {
       });
     });
+    const withRetry = async (label, fn) => {
+      let lastErr;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          lastErr = err;
+          if (attempt < 5) {
+            const backoff = 500 * 2 ** (attempt - 1);
+            console.error(`[nitro-bot] ${label} failed (attempt ${attempt}/5), retrying in ${backoff}ms:`, err);
+            await new Promise((r) => setTimeout(r, backoff));
+          }
+        }
+      }
+      throw lastErr;
+    };
     try {
-      const me = await bot.api.getMe();
+      const me = await withRetry("getMe", () => bot.api.getMe());
       const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
       if (namedCommands.length > 0)
         await bot.api.setMyCommands(namedCommands.map((c) => ({ command: c.name, description: c.description }))).catch((err) => console.error("[nitro-bot] setMyCommands failed:", err));
@@ -232,7 +245,7 @@ function startTelegramBot(options) {
           return new Response(null, { status: 200 });
         };
         registerBot(registryName, { bot, handleUpdate });
-        await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
+        await withRetry("setWebhook", () => bot.api.setWebhook(webhook.url, { secret_token: webhook.secret }));
       } else {
         registerBot(registryName, { bot });
         await bot.api.deleteWebhook();

@@ -86,9 +86,6 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
 
     bot.on("message:text", async (ctx) => {
       try {
-        console.error(
-          `[nitro-bot:diag] handler fired update=${ctx.update.update_id} chat=${ctx.chat?.id} thread=${ctx.message?.message_thread_id} msg=${ctx.message?.message_id}`,
-        );
         const botCtx = buildBotContext(ctx, botConfig);
         if (!botCtx) return;
         // Slash commands are handled above — don't also route them through the agent.
@@ -151,8 +148,27 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
     // server — a bad token, a non-https/unreachable webhook URL, or any Telegram error would otherwise
     // take the whole API down. Log and keep serving; the webhook receiver route is mounted separately,
     // so incoming updates still work once the URL is registered.
+    // Telegram occasionally returns transient errors (502/429) on startup calls. Retrying a few times
+    // keeps a momentary blip from permanently disabling the bot until the next process restart.
+    const withRetry = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          lastErr = err;
+          if (attempt < 5) {
+            const backoff = 500 * 2 ** (attempt - 1);
+            console.error(`[nitro-bot] ${label} failed (attempt ${attempt}/5), retrying in ${backoff}ms:`, err);
+            await new Promise((r) => setTimeout(r, backoff));
+          }
+        }
+      }
+      throw lastErr;
+    };
+
     try {
-      const me = await bot.api.getMe();
+      const me = await withRetry("getMe", () => bot.api.getMe());
       const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
 
       if (namedCommands.length > 0)
@@ -199,7 +215,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
           return new Response(null, { status: 200 });
         };
         registerBot(registryName, { bot, handleUpdate });
-        await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
+        await withRetry("setWebhook", () => bot.api.setWebhook(webhook.url, { secret_token: webhook.secret }));
       } else {
         registerBot(registryName, { bot });
         await bot.api.deleteWebhook();
