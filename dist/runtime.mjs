@@ -5,7 +5,7 @@ import { useState, useEffect, createElement } from 'react';
 import { s as sendFileBuiltin, c as buildBotToolSet, b as botContextStorage, r as registerBot } from './shared/nitro-bot.CQiT-gm9.mjs';
 export { g as getBot, d as getBotContext } from './shared/nitro-bot.CQiT-gm9.mjs';
 import { TelegramRenderer } from '@elumixor/react-telegram';
-import { Bot, webhookCallback, InputFile } from 'grammy';
+import { Bot, InputFile } from 'grammy';
 import 'node:fs/promises';
 import 'node:path';
 import 'zod';
@@ -202,8 +202,19 @@ function startTelegramBot(options) {
       if (webhook) {
         if (!/^https:\/\//i.test(webhook.url))
           throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
-        const handleUpdate = webhookCallback(bot, "std/http", { secretToken: webhook.secret });
         await bot.init();
+        const handleUpdate = async (req) => {
+          if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
+            return new Response("unauthorized", { status: 401 });
+          let update;
+          try {
+            update = await req.json();
+          } catch {
+            return new Response("bad request", { status: 400 });
+          }
+          void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
+          return new Response(null, { status: 200 });
+        };
         registerBot(registryName, { bot, handleUpdate });
         await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
       } else {

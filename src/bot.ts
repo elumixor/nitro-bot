@@ -1,6 +1,6 @@
 import { TelegramRenderer } from "@elumixor/react-telegram";
 import type { LanguageModel, ModelMessage, ToolSet } from "ai";
-import { Bot, type Context, InputFile, webhookCallback } from "grammy";
+import { Bot, type Context, InputFile } from "grammy";
 import { createElement } from "react";
 import type { TelegramBotConfig } from "./adapters/telegram";
 import { AgentReply, StaticReply } from "./agent-reply";
@@ -162,8 +162,22 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
       if (webhook) {
         if (!/^https:\/\//i.test(webhook.url))
           throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
-        const handleUpdate = webhookCallback(bot, "std/http", { secretToken: webhook.secret });
         await bot.init();
+        // Respond 200 to Telegram immediately, then process the update in the background. Blocking the
+        // HTTP response until the (streaming, multi-second) agent finished would let Telegram time out
+        // and re-deliver the same update — producing duplicate replies.
+        const handleUpdate = async (req: Request): Promise<Response> => {
+          if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
+            return new Response("unauthorized", { status: 401 });
+          let update: Parameters<typeof bot.handleUpdate>[0];
+          try {
+            update = (await req.json()) as Parameters<typeof bot.handleUpdate>[0];
+          } catch {
+            return new Response("bad request", { status: 400 });
+          }
+          void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
+          return new Response(null, { status: 200 });
+        };
         registerBot(registryName, { bot, handleUpdate });
         await bot.api.setWebhook(webhook.url, { secret_token: webhook.secret });
       } else {
