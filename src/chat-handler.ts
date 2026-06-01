@@ -120,16 +120,28 @@ export async function defaultInvoke(route: ToolRoute, input: unknown): Promise<u
   const useQuery = route.method === "GET" || route.method === "DELETE";
 
   if (handler && typeof handler.execute === "function") {
-    // Direct in-process invocation — no HTTP/h3 middleware, no body re-parsing.
-    const event = createSyntheticEvent();
+    // Legacy fast-path: older nitro-client builds attach `.execute`, which takes pre-parsed body/query.
+    const event = createSyntheticEvent(route.method);
     return await handler.execute(event, useQuery ? undefined : input, useQuery ? input : undefined);
   }
 
-  // Fallback: routes not built with `@elumixor/nitro-client`'s `handler()` still work via $fetch.
+  if (handler) {
+    // Current nitro-client returns a plain h3 EventHandler (no `.execute`). Invoke it directly,
+    // in-process, on a synthetic event that (a) carries the live BotContext — so `event.context.user`
+    // and friends are populated from the same AsyncLocalStorage the renderer runs in — and (b) encodes
+    // the tool input as the request body/query so the handler's own readValidatedBody/getValidatedQuery
+    // recover it. We deliberately avoid `$fetch`: Nitro's internal fetch dispatches the route in a fresh
+    // async context that does NOT carry our ALS store, so `getBotContext()` in the bot-context middleware
+    // returned undefined and `event.context.user` silently came through empty.
+    const event = createSyntheticEvent(route.method, useQuery ? { query: input } : { body: input });
+    return await (handler as EventHandler)(event);
+  }
+
+  // Last resort: routes not built with `@elumixor/nitro-client`'s `handler()` at all — go over $fetch.
   const fetcher = (globalThis as { $fetch?: NitroFetch }).$fetch;
   if (!fetcher) {
     throw new Error(
-      `[nitro-bot] route ${route.path} has no .execute (not built with nitro-client's handler()) and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`,
+      `[nitro-bot] route ${route.path} has no default handler and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`,
     );
   }
   return fetcher(route.path, {
@@ -143,7 +155,18 @@ export async function defaultInvoke(route: ToolRoute, input: unknown): Promise<u
  * the active BotContext (set via `botContextStorage.run(...)` in the bot runtime) so route
  * handlers see `event.context.bot.threadId / userId / ...` exactly like on real HTTP.
  */
-function createSyntheticEvent(): H3Event {
+function encodeQuery(query: unknown): string {
+  if (!query || typeof query !== "object") return "";
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query as Record<string, unknown>)) {
+    if (value === undefined || value === null) continue;
+    params.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+function createSyntheticEvent(method: HttpMethod = "POST", payload?: { body?: unknown; query?: unknown }): H3Event {
   const noop = () => {};
   const ctx = getBotContext();
   const baseContext: Record<string, unknown> = {};
@@ -161,7 +184,13 @@ function createSyntheticEvent(): H3Event {
     };
     Object.assign(baseContext, ctx.context);
   }
-  const req = { headers: {}, method: "POST", url: "/", on: noop };
+
+  // Encode the tool input so the route's own h3 body/query readers recover it (see defaultInvoke).
+  const path = `/${encodeQuery(payload?.query)}`;
+  const hasBody = !!payload && "body" in payload && payload.body !== undefined;
+  const headers: Record<string, string> = hasBody ? { "content-type": "application/json" } : {};
+
+  const req = { headers, method, url: path, on: noop };
   const res = {
     on: noop,
     once: noop,
@@ -174,9 +203,12 @@ function createSyntheticEvent(): H3Event {
   return {
     node: { req, res },
     context: baseContext,
-    path: "/",
-    method: "POST",
-    headers: new Headers(),
-    web: { request: new Request("http://localhost/") },
+    path,
+    _path: path,
+    // readRawBody() consumes `_requestBody` first; a plain object is JSON-stringified by h3.
+    _requestBody: hasBody ? payload?.body : undefined,
+    method,
+    headers: new Headers(headers),
+    web: { request: new Request(`http://localhost${path}`) },
   } as unknown as H3Event;
 }

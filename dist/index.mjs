@@ -89,13 +89,17 @@ async function defaultInvoke(route, input) {
   const handler = route.module.default;
   const useQuery = route.method === "GET" || route.method === "DELETE";
   if (handler && typeof handler.execute === "function") {
-    const event = createSyntheticEvent();
+    const event = createSyntheticEvent(route.method);
     return await handler.execute(event, useQuery ? void 0 : input, useQuery ? input : void 0);
+  }
+  if (handler) {
+    const event = createSyntheticEvent(route.method, useQuery ? { query: input } : { body: input });
+    return await handler(event);
   }
   const fetcher = globalThis.$fetch;
   if (!fetcher) {
     throw new Error(
-      `[nitro-bot] route ${route.path} has no .execute (not built with nitro-client's handler()) and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`
+      `[nitro-bot] route ${route.path} has no default handler and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`
     );
   }
   return fetcher(route.path, {
@@ -103,7 +107,17 @@ async function defaultInvoke(route, input) {
     ...useQuery ? { query: input } : { body: input }
   });
 }
-function createSyntheticEvent() {
+function encodeQuery(query) {
+  if (!query || typeof query !== "object") return "";
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === void 0 || value === null) continue;
+    params.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+function createSyntheticEvent(method = "POST", payload) {
   const noop = () => {
   };
   const ctx = getBotContext();
@@ -122,7 +136,10 @@ function createSyntheticEvent() {
     };
     Object.assign(baseContext, ctx.context);
   }
-  const req = { headers: {}, method: "POST", url: "/", on: noop };
+  const path = `/${encodeQuery(payload?.query)}`;
+  const hasBody = !!payload && "body" in payload && payload.body !== void 0;
+  const headers = hasBody ? { "content-type": "application/json" } : {};
+  const req = { headers, method, url: path, on: noop };
   const res = {
     on: noop,
     once: noop,
@@ -135,10 +152,13 @@ function createSyntheticEvent() {
   return {
     node: { req, res },
     context: baseContext,
-    path: "/",
-    method: "POST",
-    headers: new Headers(),
-    web: { request: new Request("http://localhost/") }
+    path,
+    _path: path,
+    // readRawBody() consumes `_requestBody` first; a plain object is JSON-stringified by h3.
+    _requestBody: hasBody ? payload?.body : void 0,
+    method,
+    headers: new Headers(headers),
+    web: { request: new Request(`http://localhost${path}`) }
   };
 }
 
