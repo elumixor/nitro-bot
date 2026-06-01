@@ -97,9 +97,16 @@ declare function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet;
 declare function createChatHandler(options: ChatOptions): EventHandler<h3.EventHandlerRequest, Promise<ChatResponse>>;
 declare function defaultInvoke(route: ToolRoute, input: unknown): Promise<unknown>;
 
+/** An imported symbol referenced inside a route's body/query schema (e.g. a Prisma enum), re-emitted into the generated handler. */
+type SchemaImport = {
+    name: string;
+    /** Module to import from — bare/aliased specifiers (`services/prisma`) kept verbatim; relative ones resolved to absolute. */
+    specifier: string;
+};
 type ExtractedSchema = {
     bodyText?: string;
     queryText?: string;
+    imports?: SchemaImport[];
 };
 type RouteParam = {
     /** The dynamic segment name — `id` for `[id]`, `statusId` for `[statusId]`. */

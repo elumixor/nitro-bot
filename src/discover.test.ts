@@ -15,7 +15,23 @@ describe("discoverToolRoutes against the example app", () => {
       "PATCH /people/:id/notes/:noteId",
       "POST /add",
       "POST /greet",
+      "POST /people/:id/status",
     ]);
+  });
+
+  test("collects imported symbols referenced inside a schema (e.g. an enum) for re-emission", async () => {
+    const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
+    const status = routes.find((r) => r.path === "/people/:id/status");
+    expect(status?.schema?.bodyText).toContain("z.enum(PersonStatus)");
+    const imports = status?.schema?.imports ?? [];
+    expect(imports.map((i) => i.name)).toEqual(["PersonStatus"]);
+    expect(imports[0]?.specifier.endsWith("/example/src/person-status")).toBe(true);
+  });
+
+  test("does not collect zod or unimported identifiers", async () => {
+    const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
+    const greet = routes.find((r) => r.path === "/greet");
+    expect(greet?.schema?.imports).toBeUndefined();
   });
 
   test("extracts dynamic segments as params paired with the nearest static collection", async () => {

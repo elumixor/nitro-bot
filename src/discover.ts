@@ -1,14 +1,22 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
-import { Node, Project, type PropertyAssignment } from "ts-morph";
+import { dirname, join, relative, resolve } from "node:path";
+import { Node, Project, type PropertyAssignment, SyntaxKind } from "ts-morph";
 import type { HttpMethod } from "./chat-handler";
 
 const METHOD_NAMES = ["get", "post", "put", "delete", "patch"] as const;
 const METHOD_SET = new Set<string>(METHOD_NAMES);
 
+/** An imported symbol referenced inside a route's body/query schema (e.g. a Prisma enum), re-emitted into the generated handler. */
+export type SchemaImport = {
+  name: string;
+  /** Module to import from — bare/aliased specifiers (`services/prisma`) kept verbatim; relative ones resolved to absolute. */
+  specifier: string;
+};
+
 export type ExtractedSchema = {
   bodyText?: string;
   queryText?: string;
+  imports?: SchemaImport[];
 };
 
 export type RouteParam = {
@@ -125,7 +133,57 @@ function extractHandlerSchema(project: Project, absPath: string): ExtractedSchem
   if (referencesDefinition(bodyText) || referencesDefinition(queryText)) return undefined;
 
   if (!bodyText && !queryText) return undefined;
-  return { bodyText, queryText };
+
+  // The schema text is inlined verbatim into the generated handler, so any symbol it references
+  // (typically a Prisma enum like `z.enum(PersonStatus)`) must be imported there too.
+  const initializers = [bodyProp, queryProp]
+    .map((prop) =>
+      prop && Node.isPropertyAssignment(prop) ? (prop as PropertyAssignment).getInitializer() : undefined,
+    )
+    .filter((node) => node !== undefined);
+  const imports = collectSchemaImports(sourceFile, initializers, absPath);
+
+  return { bodyText, queryText, imports: imports.length > 0 ? imports : undefined };
+}
+
+/** Map each imported local name in the file to the module it comes from (named, default, and namespace imports). */
+function buildImportMap(sourceFile: ReturnType<Project["addSourceFileAtPath"]>): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const decl of sourceFile.getImportDeclarations()) {
+    const specifier = decl.getModuleSpecifierValue();
+    for (const named of decl.getNamedImports()) {
+      const local = named.getAliasNode()?.getText() ?? named.getNameNode().getText();
+      map.set(local, specifier);
+    }
+    const defaultImport = decl.getDefaultImport();
+    if (defaultImport) map.set(defaultImport.getText(), specifier);
+    const namespaceImport = decl.getNamespaceImport();
+    if (namespaceImport) map.set(namespaceImport.getText(), specifier);
+  }
+  return map;
+}
+
+/** Find which imported symbols the given schema nodes reference, resolving relative specifiers to absolute paths. */
+function collectSchemaImports(
+  sourceFile: ReturnType<Project["addSourceFileAtPath"]>,
+  nodes: Node[],
+  absPath: string,
+): SchemaImport[] {
+  const importMap = buildImportMap(sourceFile);
+  const found = new Map<string, string>();
+  for (const node of nodes) {
+    for (const identifier of node.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      const name = identifier.getText();
+      // `z` is always imported by the generated handler; skip it and anything already collected.
+      if (name === "z" || found.has(name)) continue;
+      const specifier = importMap.get(name);
+      if (specifier) found.set(name, specifier);
+    }
+  }
+  return [...found].map(([name, specifier]) => ({
+    name,
+    specifier: specifier.startsWith(".") ? resolve(dirname(absPath), specifier).replace(/\\/g, "/") : specifier,
+  }));
 }
 
 function referencesDefinition(text: string | undefined): boolean {
