@@ -206,6 +206,8 @@ function startTelegramBot(options) {
         if (!/^https:\/\//i.test(webhook.url))
           throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
         await bot.init();
+        const seenMessages = /* @__PURE__ */ new Map();
+        const DEDUPE_TTL_MS = 5 * 6e4;
         const handleUpdate = async (req) => {
           if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
             return new Response("unauthorized", { status: 401 });
@@ -215,7 +217,17 @@ function startTelegramBot(options) {
           } catch {
             return new Response("bad request", { status: 400 });
           }
-          console.error(`[nitro-bot:diag] webhook received update=${update.update_id}`);
+          const msg = update.message;
+          if (msg?.message_id !== void 0 && msg.chat?.id !== void 0) {
+            const key = `${msg.chat.id}:${msg.message_id}`;
+            const now = Date.now();
+            for (const [k, t] of seenMessages) if (now - t > DEDUPE_TTL_MS) seenMessages.delete(k);
+            if (seenMessages.has(key)) {
+              console.error(`[nitro-bot] dropping duplicate delivery of ${key} (update ${update.update_id})`);
+              return new Response(null, { status: 200 });
+            }
+            seenMessages.set(key, now);
+          }
           void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
           return new Response(null, { status: 200 });
         };

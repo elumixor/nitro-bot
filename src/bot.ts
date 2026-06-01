@@ -169,6 +169,12 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
         // Respond 200 to Telegram immediately, then process the update in the background. Blocking the
         // HTTP response until the (streaming, multi-second) agent finished would let Telegram time out
         // and re-deliver the same update — producing duplicate replies.
+        // Idempotency by (chat, message) — NOT by update_id. Telegram can deliver the same user message
+        // as two updates with different update_ids (observed in supergroups), which would otherwise drive
+        // two independent agent runs and two replies. We dedupe on `${chat}:${message_id}` within a short
+        // window so a repeated delivery is acked 200 but not re-processed.
+        const seenMessages = new Map<string, number>();
+        const DEDUPE_TTL_MS = 5 * 60_000;
         const handleUpdate = async (req: Request): Promise<Response> => {
           if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
             return new Response("unauthorized", { status: 401 });
@@ -178,7 +184,17 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
           } catch {
             return new Response("bad request", { status: 400 });
           }
-          console.error(`[nitro-bot:diag] webhook received update=${(update as { update_id?: number }).update_id}`);
+          const msg = (update as { message?: { message_id?: number; chat?: { id?: number } } }).message;
+          if (msg?.message_id !== undefined && msg.chat?.id !== undefined) {
+            const key = `${msg.chat.id}:${msg.message_id}`;
+            const now = Date.now();
+            for (const [k, t] of seenMessages) if (now - t > DEDUPE_TTL_MS) seenMessages.delete(k);
+            if (seenMessages.has(key)) {
+              console.error(`[nitro-bot] dropping duplicate delivery of ${key} (update ${update.update_id})`);
+              return new Response(null, { status: 200 });
+            }
+            seenMessages.set(key, now);
+          }
           void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
           return new Response(null, { status: 200 });
         };
