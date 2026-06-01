@@ -137,8 +137,11 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
 
     nitroApp.hooks.hook("close", async () => {
       closing = true;
-      if (webhook) await bot.api.deleteWebhook().catch(() => {});
-      else await bot.stop().catch(() => {});
+      // Webhook mode: do NOT deleteWebhook here. The webhook points at the stable app URL, not this
+      // machine — on a rolling deploy a departing instance would otherwise clear the webhook the new
+      // instance just registered, silently killing the bot until the next boot. Polling mode: stop
+      // the long-poll loop cleanly.
+      if (!webhook) await bot.stop().catch(() => {});
     });
 
     // The bot shares this process with the host's HTTP API. Bringing the bot up must NEVER crash the

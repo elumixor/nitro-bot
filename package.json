@@ -1,6 +1,6 @@
 {
   "name": "@elumixor/nitro-bot",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Auto-generate an LLM chat-bot endpoint from your Nitro routes",
   "repository": {
     "type": "git",

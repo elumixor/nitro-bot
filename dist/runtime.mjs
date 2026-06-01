@@ -190,9 +190,7 @@ function startTelegramBot(options) {
     let closing = false;
     nitroApp.hooks.hook("close", async () => {
       closing = true;
-      if (webhook) await bot.api.deleteWebhook().catch(() => {
-      });
-      else await bot.stop().catch(() => {
+      if (!webhook) await bot.stop().catch(() => {
       });
     });
     try {
