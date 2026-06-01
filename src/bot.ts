@@ -86,6 +86,9 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
 
     bot.on("message:text", async (ctx) => {
       try {
+        console.error(
+          `[nitro-bot:diag] handler fired update=${ctx.update.update_id} chat=${ctx.chat?.id} thread=${ctx.message?.message_thread_id} msg=${ctx.message?.message_id}`,
+        );
         const botCtx = buildBotContext(ctx, botConfig);
         if (!botCtx) return;
         // Slash commands are handled above — don't also route them through the agent.
@@ -175,6 +178,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
           } catch {
             return new Response("bad request", { status: 400 });
           }
+          console.error(`[nitro-bot:diag] webhook received update=${(update as { update_id?: number }).update_id}`);
           void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
           return new Response(null, { status: 200 });
         };
