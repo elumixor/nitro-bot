@@ -234,12 +234,15 @@ function startTelegramBot(options) {
           if (msg?.message_id !== void 0 && msg.chat?.id !== void 0) {
             const key = `${msg.chat.id}:${msg.message_id}`;
             const now = Date.now();
-            for (const [k, t] of seenMessages) if (now - t > DEDUPE_TTL_MS) seenMessages.delete(k);
-            if (seenMessages.has(key)) {
-              console.error(`[nitro-bot] dropping duplicate delivery of ${key} (update ${update.update_id})`);
+            for (const [k, v] of seenMessages) if (now - v.t > DEDUPE_TTL_MS) seenMessages.delete(k);
+            const prior = seenMessages.get(key);
+            if (prior) {
+              console.error(
+                `[nitro-bot] dropping duplicate delivery of ${key}: update ${update.update_id} (already processed as update ${prior.firstUpdateId})`
+              );
               return new Response(null, { status: 200 });
             }
-            seenMessages.set(key, now);
+            seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
           }
           void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
           return new Response(null, { status: 200 });

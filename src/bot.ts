@@ -189,7 +189,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
         // as two updates with different update_ids (observed in supergroups), which would otherwise drive
         // two independent agent runs and two replies. We dedupe on `${chat}:${message_id}` within a short
         // window so a repeated delivery is acked 200 but not re-processed.
-        const seenMessages = new Map<string, number>();
+        const seenMessages = new Map<string, { firstUpdateId?: number; t: number }>();
         const DEDUPE_TTL_MS = 5 * 60_000;
         const handleUpdate = async (req: Request): Promise<Response> => {
           if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
@@ -204,12 +204,17 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
           if (msg?.message_id !== undefined && msg.chat?.id !== undefined) {
             const key = `${msg.chat.id}:${msg.message_id}`;
             const now = Date.now();
-            for (const [k, t] of seenMessages) if (now - t > DEDUPE_TTL_MS) seenMessages.delete(k);
-            if (seenMessages.has(key)) {
-              console.error(`[nitro-bot] dropping duplicate delivery of ${key} (update ${update.update_id})`);
+            for (const [k, v] of seenMessages) if (now - v.t > DEDUPE_TTL_MS) seenMessages.delete(k);
+            const prior = seenMessages.get(key);
+            if (prior) {
+              // The two deliveries' update_ids reveal whether a second bot/webhook is mirroring this chat:
+              // a single bot's ids are monotonic, so wildly different ids = two delivery streams.
+              console.error(
+                `[nitro-bot] dropping duplicate delivery of ${key}: update ${update.update_id} (already processed as update ${prior.firstUpdateId})`,
+              );
               return new Response(null, { status: 200 });
             }
-            seenMessages.set(key, now);
+            seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
           }
           void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
           return new Response(null, { status: 200 });
