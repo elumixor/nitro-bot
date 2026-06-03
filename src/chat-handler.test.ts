@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LanguageModelV2, LanguageModelV2CallOptions, LanguageModelV2Content } from "@ai-sdk/provider";
-import { generateText, type LanguageModel, stepCountIs } from "ai";
+import { asSchema, generateText, type LanguageModel, stepCountIs } from "ai";
 import { createApp, toWebHandler } from "h3";
 import { z } from "zod";
 import { buildToolSet, createChatHandler, defaultInvoke, type ToolRoute } from "./chat-handler";
@@ -65,6 +65,58 @@ describe("LLM-safe schema rewriting", () => {
     expect(schema.parse({ required: "ok", maybe: null })).toEqual({ required: "ok", maybe: null });
     expect(schema.parse({ required: "ok", maybe: "hi" })).toEqual({ required: "ok", maybe: "hi" });
     expect(() => schema.parse({ required: "ok" })).toThrow();
+  });
+
+  test("date fields (incl. coerced and nested) become JSON-representable strings but still parse to Date", () => {
+    const route: ToolRoute = {
+      method: "POST",
+      path: "/x",
+      module: {
+        definition: tool({
+          name: "x",
+          description: "x",
+          input: {
+            date: z.coerce.date().describe("The day."),
+            rawDate: z.date(),
+            maybeDate: z.coerce.date().optional(),
+            milestones: z.array(z.object({ startDate: z.coerce.date() })),
+          },
+        }),
+      },
+    };
+    const tools = buildToolSet([route], () => ({ ok: true }));
+    const schema = tools.x?.inputSchema as z.ZodType;
+
+    // Representable: converting to JSON Schema must not throw, and dates surface as strings.
+    const json = asSchema(schema).jsonSchema as {
+      properties: Record<string, { type?: string; description?: string }>;
+    };
+    expect(json.properties.date).toMatchObject({ type: "string", description: "The day." });
+    expect(json.properties.rawDate).toMatchObject({ type: "string" });
+    expect(json.properties.milestones).toMatchObject({ type: "array" });
+
+    // Parsing still yields real Date objects, including nested ones.
+    const parsed = (schema as z.ZodType).parse({
+      date: "2026-06-03",
+      rawDate: "2026-02-02",
+      maybeDate: null,
+      milestones: [{ startDate: "2026-01-01" }],
+    }) as { date: Date; rawDate: Date; milestones: { startDate: Date }[] };
+    expect(parsed.date).toBeInstanceOf(Date);
+    expect(parsed.rawDate).toBeInstanceOf(Date);
+    expect(parsed.milestones[0]?.startDate).toBeInstanceOf(Date);
+
+    // Invalid date strings are still rejected.
+    expect(() => (schema as z.ZodType).parse({ date: "nope", rawDate: "2026-02-02", milestones: [] })).toThrow();
+  });
+
+  test("a genuinely unrepresentable input type fails at build time, naming the tool", () => {
+    const route: ToolRoute = {
+      method: "POST",
+      path: "/x",
+      module: { definition: tool({ name: "bad_tool", description: "x", input: { m: z.map(z.string(), z.string()) } }) },
+    };
+    expect(() => buildToolSet([route], () => ({ ok: true }))).toThrow(/bad_tool/);
   });
 });
 

@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, tool as tool$1 } from 'ai';
+import { generateText, stepCountIs, tool as tool$1, asSchema } from 'ai';
 import { d as getBotContext } from './shared/nitro-bot.CQiT-gm9.mjs';
 export { a as botTool, c as buildBotToolSet, g as getBot, i as isBotToolDefinition, r as registerBot, s as sendFileBuiltin } from './shared/nitro-bot.CQiT-gm9.mjs';
 import { defineEventHandler, getValidatedQuery, readFormData, readValidatedBody } from 'h3';
@@ -32,27 +32,71 @@ function buildToolSet(routes, invoke) {
     const { definition } = route.module;
     const base = Object.keys(definition.input).length > 0 ? definition.input : route.autoInput ?? definition.input;
     const inputShape = route.paramsInput ? { ...route.paramsInput, ...base } : base;
+    const inputSchema = z.object(llmSafeShape(inputShape));
+    assertRepresentable(definition.name, inputSchema);
     return [
       definition.name,
       tool$1({
         description: definition.description,
-        inputSchema: z.object(llmSafeShape(inputShape)),
+        inputSchema,
         execute: async (input) => invoke(route, input)
       })
     ];
   });
   return Object.fromEntries(entries);
 }
+function assertRepresentable(toolName, schema) {
+  try {
+    asSchema(schema).jsonSchema;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[nitro-bot] Tool "${toolName}" has an input schema that cannot be represented in JSON Schema: ${message}. Replace the offending field with a JSON-representable type (e.g. an ISO date string that parses to a Date via \`z.string().transform((v) => new Date(v)).pipe(z.date())\`).`
+    );
+  }
+}
 function llmSafeShape(shape) {
   const out = {};
-  for (const [key, schema] of Object.entries(shape)) out[key] = toNullableIfOptional(schema);
+  for (const [key, schema] of Object.entries(shape)) out[key] = llmSafe(schema);
   return out;
 }
-function toNullableIfOptional(schema) {
-  const internal = schema;
-  if (internal._zod?.def?.type !== "optional") return schema;
-  const inner = internal._zod.def.innerType;
-  return inner ? inner.nullable() : schema;
+function defType(schema) {
+  return schema._zod?.def?.type;
+}
+function defOf(schema) {
+  return schema._zod?.def ?? {};
+}
+function withDescription(schema, source) {
+  const description = source.description;
+  return description ? schema.describe(description) : schema;
+}
+function llmSafe(schema) {
+  switch (defType(schema)) {
+    case "date":
+      return withDescription(
+        z.string().transform((value) => new Date(value)).pipe(z.date()),
+        schema
+      );
+    case "optional": {
+      const inner = defOf(schema).innerType;
+      return inner ? withDescription(llmSafe(inner).nullable(), schema) : schema;
+    }
+    case "nullable": {
+      const inner = defOf(schema).innerType;
+      return inner ? withDescription(llmSafe(inner).nullable(), schema) : schema;
+    }
+    case "array": {
+      const element = defOf(schema).element;
+      return element ? withDescription(z.array(llmSafe(element)), schema) : schema;
+    }
+    case "object": {
+      const shape = defOf(schema).shape;
+      if (!shape) return schema;
+      return withDescription(z.object(llmSafeShape(shape)), schema);
+    }
+    default:
+      return schema;
+  }
 }
 function createChatHandler(options) {
   const invoke = options.invoke ?? defaultInvoke;

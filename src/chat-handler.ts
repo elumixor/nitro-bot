@@ -1,4 +1,4 @@
-import { tool as aiTool, type LanguageModel, type ToolSet } from "ai";
+import { tool as aiTool, asSchema, type LanguageModel, type ToolSet } from "ai";
 import {
   defineEventHandler,
   type EventHandler,
@@ -51,11 +51,16 @@ export function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet {
     // Dynamic-segment params are structural — they belong in the schema regardless of whether the
     // body/query came from `definition.input` or auto-extraction, so they merge on top of either.
     const inputShape = route.paramsInput ? { ...route.paramsInput, ...base } : base;
+    const inputSchema = z.object(llmSafeShape(inputShape));
+    // Fail fast: the AI SDK converts inputSchema to JSON Schema lazily, on the first request that lists
+    // tools. Force that conversion now so an unrepresentable type (e.g. a raw `z.date()` we couldn't
+    // auto-fix) throws at startup, naming the offending tool, instead of surfacing mid-conversation.
+    assertRepresentable(definition.name, inputSchema);
     return [
       definition.name,
       aiTool({
         description: definition.description,
-        inputSchema: z.object(llmSafeShape(inputShape)),
+        inputSchema,
         execute: async (input: unknown) => invoke(route, input),
       }),
     ] as const;
@@ -63,18 +68,80 @@ export function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet {
   return Object.fromEntries(entries) as ToolSet;
 }
 
+function assertRepresentable(toolName: string, schema: z.ZodType): void {
+  try {
+    asSchema(schema).jsonSchema;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[nitro-bot] Tool "${toolName}" has an input schema that cannot be represented in JSON Schema: ${message}. ` +
+        "Replace the offending field with a JSON-representable type (e.g. an ISO date string that parses to a Date " +
+        "via `z.string().transform((v) => new Date(v)).pipe(z.date())`).",
+    );
+  }
+}
+
 function llmSafeShape(shape: z.ZodRawShape): z.ZodRawShape {
   const out: Record<string, z.ZodType> = {};
-  for (const [key, schema] of Object.entries(shape)) out[key] = toNullableIfOptional(schema as z.ZodType);
+  for (const [key, schema] of Object.entries(shape)) out[key] = llmSafe(schema as z.ZodType);
   return out;
 }
 
-function toNullableIfOptional(schema: z.ZodType): z.ZodType {
-  type V4Internal = { _zod?: { def?: { type?: string; innerType?: z.ZodType } } };
-  const internal = schema as unknown as V4Internal;
-  if (internal._zod?.def?.type !== "optional") return schema;
-  const inner = internal._zod.def.innerType;
-  return inner ? inner.nullable() : schema;
+type V4Internal = {
+  _zod?: { def?: { type?: string; innerType?: z.ZodType; element?: z.ZodType; shape?: z.ZodRawShape } };
+};
+
+function defType(schema: z.ZodType): string | undefined {
+  return (schema as unknown as V4Internal)._zod?.def?.type;
+}
+
+function defOf(schema: z.ZodType): NonNullable<NonNullable<V4Internal["_zod"]>["def"]> {
+  return (schema as unknown as V4Internal)._zod?.def ?? {};
+}
+
+function withDescription(schema: z.ZodType, source: z.ZodType): z.ZodType {
+  const description = source.description;
+  return description ? schema.describe(description) : schema;
+}
+
+/**
+ * Recursively rewrite a zod schema into one the AI SDK can convert to JSON Schema:
+ *  - `z.date()` / `z.coerce.date()` (a `ZodDate`, unrepresentable) → an ISO-string schema that still
+ *    parses to a `Date`, so route handlers and their downstream consumers are unaffected.
+ *  - `.optional()` → `.nullable()`: LLM tool inputs have no notion of an absent property the way TS does;
+ *    nullable models "the model may omit this" far more reliably than optional. (Preserves prior behavior.)
+ * Recurses through objects, arrays, and optional/nullable wrappers so nested dates are fixed too.
+ */
+function llmSafe(schema: z.ZodType): z.ZodType {
+  switch (defType(schema)) {
+    case "date":
+      return withDescription(
+        z
+          .string()
+          .transform((value) => new Date(value))
+          .pipe(z.date()),
+        schema,
+      );
+    case "optional": {
+      const inner = defOf(schema).innerType;
+      return inner ? withDescription(llmSafe(inner).nullable(), schema) : schema;
+    }
+    case "nullable": {
+      const inner = defOf(schema).innerType;
+      return inner ? withDescription(llmSafe(inner).nullable(), schema) : schema;
+    }
+    case "array": {
+      const element = defOf(schema).element;
+      return element ? withDescription(z.array(llmSafe(element)), schema) : schema;
+    }
+    case "object": {
+      const shape = defOf(schema).shape;
+      if (!shape) return schema;
+      return withDescription(z.object(llmSafeShape(shape)), schema);
+    }
+    default:
+      return schema;
+  }
 }
 
 export function createChatHandler(options: ChatOptions) {

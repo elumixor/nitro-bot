@@ -1,5 +1,6 @@
 node_modules
-dist
+# dist/ is intentionally committed: the backend consumes this package by git SHA, and bun/npm do not
+# run `build` when installing from git, so the compiled output must be tracked for consumers to work.
 .nitro
 .nitro-bot
 .output
