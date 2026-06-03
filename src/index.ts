@@ -8,8 +8,6 @@ export { type RunAgentOptions, type RunAgentResult, runAgent } from "./agent";
 export { getBotContext } from "./als";
 export { type AnyBotTool, type BotToolDefinition, botTool, buildBotToolSet, isBotToolDefinition } from "./bot-tool";
 export { sendFileBuiltin } from "./builtins";
-export { type BotCommandDef, botCommand, type CommandContext } from "./command";
-export { type BotEntry, getBot, registerBot } from "./registry";
 export {
   buildToolSet,
   type ChatOptions,
@@ -20,6 +18,7 @@ export {
   type InvokeFn,
   type ToolRoute,
 } from "./chat-handler";
+export { type BotCommandDef, botCommand, type CommandContext } from "./command";
 export {
   type ChatConfig,
   type RequestSource,
@@ -28,6 +27,7 @@ export {
 } from "./config";
 export { type DiscoveredRoute, discoverToolRoutes } from "./discover";
 export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-module";
+export { type BotEntry, getBot, registerBot } from "./registry";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
 export {
   type BotContext,

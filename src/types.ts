@@ -67,6 +67,7 @@ export type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
 
 export type BotPreFn<C extends Record<string, unknown> = NitroBotContext> = (
   ctx: BotContext<C>,
+  // biome-ignore lint/suspicious/noConfusingVoidType: a middleware may return void (continue), false (halt), or a promise of either; `undefined` would reject consumers' `Promise<void>` callbacks
 ) => Promise<void | false> | void | false;
 
 export type BotPostFn<C extends Record<string, unknown> = NitroBotContext> = (

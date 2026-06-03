@@ -2,8 +2,8 @@ import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
 import { streamText, stepCountIs } from 'ai';
 import { useState, useEffect, createElement } from 'react';
-import { s as sendFileBuiltin, c as buildBotToolSet, b as botContextStorage, r as registerBot } from './shared/nitro-bot.CQiT-gm9.mjs';
-export { g as getBot, d as getBotContext } from './shared/nitro-bot.CQiT-gm9.mjs';
+import { s as sendFileBuiltin, c as buildBotToolSet, b as botContextStorage, r as registerBot } from './shared/nitro-bot.Ct0KJICm.mjs';
+export { g as getBot, d as getBotContext } from './shared/nitro-bot.Ct0KJICm.mjs';
 import { TelegramRenderer } from '@elumixor/react-telegram';
 import { Bot, InputFile } from 'grammy';
 import 'node:fs/promises';
@@ -130,7 +130,7 @@ function startTelegramBot(options) {
               invokeTool: async (toolName, input) => {
                 const t = allTools[toolName];
                 if (!t?.execute) throw new Error(`[nitro-bot] command "${cmd.name}": unknown tool "${toolName}".`);
-                return t.execute(input ?? {}, { toolCallId: `command:${cmd.name}`, messages: [] });
+                return await t.execute(input ?? {}, { toolCallId: `command:${cmd.name}`, messages: [] });
               }
             });
             const text = await cmd.run(cmdCtx);

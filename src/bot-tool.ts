@@ -61,7 +61,7 @@ export function buildBotToolSet(defs: readonly AnyBotTool[]): ToolSet {
         execute: async (input: unknown) => {
           const ctx = getBotContext();
           if (!ctx) throw new Error(`[nitro-bot] bot tool "${def.name}" was called outside an active bot turn.`);
-          return def.execute(input as never, ctx);
+          return await def.execute(input as never, ctx);
         },
       }),
     ] as const;

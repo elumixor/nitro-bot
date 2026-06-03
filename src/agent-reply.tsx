@@ -19,7 +19,8 @@ const MAX_REASONING_PREVIEW = 300;
 function compose(reasoning: string, toolLines: string[], answer: string): string {
   const sections: string[] = [];
   if (reasoning && !answer) {
-    const preview = reasoning.length > MAX_REASONING_PREVIEW ? `${reasoning.slice(-MAX_REASONING_PREVIEW)}…` : reasoning;
+    const preview =
+      reasoning.length > MAX_REASONING_PREVIEW ? `${reasoning.slice(-MAX_REASONING_PREVIEW)}…` : reasoning;
     sections.push(`_${preview.trim()}_`);
   }
   if (toolLines.length) sections.push(toolLines.join("\n"));

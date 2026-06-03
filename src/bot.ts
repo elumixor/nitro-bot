@@ -68,7 +68,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
               invokeTool: async (toolName: string, input?: unknown) => {
                 const t = (allTools as Record<string, ExecutableTool>)[toolName];
                 if (!t?.execute) throw new Error(`[nitro-bot] command "${cmd.name}": unknown tool "${toolName}".`);
-                return t.execute(input ?? {}, { toolCallId: `command:${cmd.name}`, messages: [] });
+                return await t.execute(input ?? {}, { toolCallId: `command:${cmd.name}`, messages: [] });
               },
             });
             const text = await cmd.run(cmdCtx);

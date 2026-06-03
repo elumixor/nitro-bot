@@ -1,6 +1,6 @@
 import { generateText, stepCountIs, tool as tool$1, asSchema } from 'ai';
-import { d as getBotContext } from './shared/nitro-bot.CQiT-gm9.mjs';
-export { a as botTool, c as buildBotToolSet, g as getBot, i as isBotToolDefinition, r as registerBot, s as sendFileBuiltin } from './shared/nitro-bot.CQiT-gm9.mjs';
+import { d as getBotContext } from './shared/nitro-bot.Ct0KJICm.mjs';
+export { a as botTool, c as buildBotToolSet, g as getBot, i as isBotToolDefinition, r as registerBot, s as sendFileBuiltin } from './shared/nitro-bot.Ct0KJICm.mjs';
 import { defineEventHandler, getValidatedQuery, readFormData, readValidatedBody } from 'h3';
 import { z } from 'zod';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
@@ -21,10 +21,6 @@ async function runAgent(options) {
     stopWhen: stepCountIs(options.maxSteps ?? 8)
   });
   return { text: result.text, steps: result.steps?.length ?? 0 };
-}
-
-function botCommand(def) {
-  return def;
 }
 
 function buildToolSet(routes, invoke) {
@@ -224,6 +220,10 @@ function createSyntheticEvent(method = "POST", payload) {
     headers: new Headers(headers),
     web: { request: new Request(`http://localhost${path}`) }
   };
+}
+
+function botCommand(def) {
+  return def;
 }
 
 const DEFAULT_CONFIG = {

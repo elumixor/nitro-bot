@@ -32,7 +32,7 @@ function buildBotToolSet(defs) {
         execute: async (input) => {
           const ctx = getBotContext();
           if (!ctx) throw new Error(`[nitro-bot] bot tool "${def.name}" was called outside an active bot turn.`);
-          return def.execute(input, ctx);
+          return await def.execute(input, ctx);
         }
       })
     ];
