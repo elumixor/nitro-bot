@@ -35,8 +35,11 @@ export type TelegramBotConfig = {
    * updates. Use for app bootstrap: DB migrations, warming caches, syncing remote config, etc.
    */
   onStart?: (ctx: { bot: Bot; info: TelegramBotInfo }) => void | Promise<void>;
-  /** Built-in tools auto-provided to this bot. `sendFile` (default on) lets the model deliver files. */
-  builtins?: { sendFile?: boolean };
+  /**
+   * Built-in tools auto-provided to this bot (both default on). `sendFile` lets the model deliver files;
+   * `react` lets it acknowledge a message with an emoji reaction.
+   */
+  builtins?: { sendFile?: boolean; react?: boolean };
 };
 
 /** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */

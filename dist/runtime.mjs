@@ -2,8 +2,8 @@ import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
 import { streamText, stepCountIs } from 'ai';
 import { useState, useEffect, createElement } from 'react';
-import { s as sendFileBuiltin, c as buildBotToolSet, b as botContextStorage, r as registerBot } from './shared/nitro-bot.Ct0KJICm.mjs';
-export { g as getBot, d as getBotContext } from './shared/nitro-bot.Ct0KJICm.mjs';
+import { s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, e as registerBot } from './shared/nitro-bot.CPqsWG-G.mjs';
+export { g as getBot, d as getBotContext } from './shared/nitro-bot.CPqsWG-G.mjs';
 import { TelegramRenderer } from '@elumixor/react-telegram';
 import { Bot, InputFile } from 'grammy';
 import 'node:fs/promises';
@@ -108,7 +108,10 @@ function startTelegramBot(options) {
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
   const bot = botConfig.bot ?? new Bot(botConfig.token);
   const registryName = options.name ?? "telegram";
-  const builtins = botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin];
+  const builtins = [
+    ...botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin],
+    ...botConfig.builtins?.react === false ? [] : [reactBuiltin]
+  ];
   const allTools = { ...tools, ...buildBotToolSet([...builtins, ...botTools]) };
   const namedCommands = commands.filter((c) => Boolean(c.name));
   return defineNitroPlugin(async (nitroApp) => {
@@ -275,14 +278,26 @@ function buildBotContext(ctx, config) {
     },
     sendText: async (text) => {
       await ctx.reply(text);
+    },
+    react: async (emoji = "\u{1F44D}") => {
+      try {
+        await ctx.react(emoji);
+      } catch {
+        if (emoji !== "\u{1F44D}") await ctx.react("\u{1F44D}").catch(() => {
+        });
+      }
     }
   };
+  const topicId = msg.is_topic_message ? msg.message_thread_id : void 0;
+  const replyFrom = msg.reply_to_message?.from;
   return {
     bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
     message: {
       text: msg.text,
       id: msg.message_id,
-      replyToId: msg.reply_to_message?.message_id
+      replyToId: msg.reply_to_message?.message_id,
+      replyToFromId: replyFrom ? String(replyFrom.id) : void 0,
+      repliesToBot: replyFrom ? replyFrom.id === ctx.me?.id : void 0
     },
     user: {
       id: String(ctx.from.id),
@@ -294,7 +309,8 @@ function buildBotContext(ctx, config) {
     thread: {
       id: String(ctx.chat.id),
       type: chatType,
-      title: "title" in ctx.chat ? ctx.chat.title : void 0
+      title: "title" in ctx.chat ? ctx.chat.title : void 0,
+      topicId
     },
     agent: { messages: [] },
     reply,

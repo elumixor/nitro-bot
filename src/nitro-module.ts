@@ -294,6 +294,7 @@ export default defineEventHandler((event) => {
     threadId: ctx.thread.id,
     threadName: ctx.thread.title,
     threadType: ctx.thread.type,
+    topicId: ctx.thread.topicId,
     userId: ctx.user.id,
     userName: ctx.user.username ?? ctx.user.firstName,
     botName: ctx.bot.name,

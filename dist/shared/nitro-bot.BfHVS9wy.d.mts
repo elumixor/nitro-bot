@@ -43,9 +43,13 @@ type TelegramBotConfig = {
         bot: Bot;
         info: TelegramBotInfo;
     }) => void | Promise<void>;
-    /** Built-in tools auto-provided to this bot. `sendFile` (default on) lets the model deliver files. */
+    /**
+     * Built-in tools auto-provided to this bot (both default on). `sendFile` lets the model deliver files;
+     * `react` lets it acknowledge a message with an emoji reaction.
+     */
     builtins?: {
         sendFile?: boolean;
+        react?: boolean;
     };
 };
 /** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */
@@ -64,6 +68,8 @@ declare module "h3" {
             botUsername?: string;
             messageId: number;
             replyToId?: number;
+            /** Forum-topic id (`message_thread_id`) when the message is in a topic; undefined otherwise. */
+            topicId?: number;
         };
     }
 }
@@ -86,6 +92,12 @@ type ChatReply = {
     sendDocument: (data: Uint8Array | Buffer, filename: string, caption?: string) => Promise<void>;
     sendPhoto: (data: Uint8Array | Buffer, caption?: string) => Promise<void>;
     sendText: (text: string) => Promise<void>;
+    /**
+     * React to the triggering message with an emoji (Telegram `setMessageReaction`). Telegram only
+     * accepts a fixed set of reaction emojis (e.g. 👍 👌 🎉 🙏 💯 — `✅` is NOT allowed); an invalid
+     * emoji silently falls back to 👍. Defaults to 👍.
+     */
+    react: (emoji?: string) => Promise<void>;
 };
 type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
     bot: {
@@ -96,6 +108,10 @@ type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
         text: string;
         id: number;
         replyToId?: number;
+        /** Sender id of the replied-to message, if this message is a reply. */
+        replyToFromId?: string;
+        /** True when this message replies directly to one of the bot's own messages. */
+        repliesToBot?: boolean;
     };
     user: {
         id: string;
@@ -108,6 +124,8 @@ type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
         id: string;
         type: "private" | "group" | "supergroup" | "channel";
         title?: string;
+        /** Forum-topic id (`message_thread_id`) when the message is in a topic; undefined otherwise. */
+        topicId?: number;
     };
     agent: {
         messages: ModelMessage[];

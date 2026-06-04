@@ -1,6 +1,6 @@
 import { generateText, stepCountIs, tool as tool$1, asSchema } from 'ai';
-import { d as getBotContext } from './shared/nitro-bot.Ct0KJICm.mjs';
-export { a as botTool, c as buildBotToolSet, g as getBot, i as isBotToolDefinition, r as registerBot, s as sendFileBuiltin } from './shared/nitro-bot.Ct0KJICm.mjs';
+import { d as getBotContext } from './shared/nitro-bot.CPqsWG-G.mjs';
+export { a as botTool, c as buildBotToolSet, g as getBot, i as isBotToolDefinition, e as registerBot, s as sendFileBuiltin } from './shared/nitro-bot.CPqsWG-G.mjs';
 import { defineEventHandler, getValidatedQuery, readFormData, readValidatedBody } from 'h3';
 import { z } from 'zod';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
@@ -580,6 +580,7 @@ export default defineEventHandler((event) => {
     threadId: ctx.thread.id,
     threadName: ctx.thread.title,
     threadType: ctx.thread.type,
+    topicId: ctx.thread.topicId,
     userId: ctx.user.id,
     userName: ctx.user.username ?? ctx.user.firstName,
     botName: ctx.bot.name,

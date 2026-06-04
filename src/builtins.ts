@@ -25,3 +25,20 @@ export const sendFileBuiltin = botTool({
     return `Sent ${name} to the chat.`;
   },
 });
+
+/**
+ * Built-in tool auto-registered for Telegram bots (opt out via `builtins: { react: false }`). Lets the
+ * model acknowledge a message with an emoji reaction instead of a text reply. Telegram only accepts a
+ * fixed reaction set (👍 👌 🎉 🙏 💯 …); `✅` is not allowed and falls back to 👍.
+ */
+export const reactBuiltin = botTool({
+  name: "react",
+  description:
+    "React to the user's current message with an emoji (e.g. to acknowledge it's handled) instead of sending text. " +
+    "Telegram allows only a fixed set: 👍 👎 ❤ 🔥 🎉 🙏 👌 💯 🏆 (✅ is NOT allowed and becomes 👍). Defaults to 👍.",
+  input: { emoji: z.string().nullable().describe("Reaction emoji from Telegram's allowed set, or null for 👍.") },
+  execute: async ({ emoji }, ctx) => {
+    await ctx.reply.react(emoji ?? "👍");
+    return `Reacted with ${emoji ?? "👍"}.`;
+  },
+});

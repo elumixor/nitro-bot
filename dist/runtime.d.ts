@@ -1,7 +1,7 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import { ModelMessage, ToolSet, LanguageModel } from 'ai';
-import { T as TelegramBotConfig, d as BotPreFn, c as BotPostFn, A as AnyBotTool, B as BotCommandDef } from './shared/nitro-bot.CrIQ3eEt.js';
-export { b as BotEntry, j as botContextStorage, p as getBot, q as getBotContext, s as registerBot } from './shared/nitro-bot.CrIQ3eEt.js';
+import { T as TelegramBotConfig, d as BotPreFn, c as BotPostFn, A as AnyBotTool, B as BotCommandDef } from './shared/nitro-bot.BfHVS9wy.js';
+export { b as BotEntry, j as botContextStorage, p as getBot, q as getBotContext, s as registerBot } from './shared/nitro-bot.BfHVS9wy.js';
 import 'grammy';
 import 'node:async_hooks';
 import 'zod';

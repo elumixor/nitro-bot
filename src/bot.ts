@@ -6,7 +6,7 @@ import type { TelegramBotConfig } from "./adapters/telegram";
 import { AgentReply, StaticReply } from "./agent-reply";
 import { botContextStorage } from "./als";
 import { type AnyBotTool, buildBotToolSet } from "./bot-tool";
-import { sendFileBuiltin } from "./builtins";
+import { reactBuiltin, sendFileBuiltin } from "./builtins";
 import type { BotCommandDef, CommandContext } from "./command";
 import { registerBot } from "./registry";
 import type { BotContext, BotPostFn, BotPreFn, ChatReply } from "./types";
@@ -38,7 +38,10 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
   const bot = botConfig.bot ?? new Bot(botConfig.token as string);
   const registryName = options.name ?? "telegram";
 
-  const builtins = botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin];
+  const builtins = [
+    ...(botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin]),
+    ...(botConfig.builtins?.react === false ? [] : [reactBuiltin]),
+  ];
   const allTools: ToolSet = { ...tools, ...buildBotToolSet([...builtins, ...botTools]) };
 
   // The module fills `name` from the file name; only commands with a resolved name can be registered.
@@ -254,7 +257,20 @@ function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | 
     sendText: async (text) => {
       await ctx.reply(text);
     },
+    react: async (emoji = "👍") => {
+      // Telegram only accepts a fixed reaction set; an unsupported emoji (e.g. ✅) throws
+      // REACTION_INVALID — fall back to 👍 so a "done" signal still lands.
+      try {
+        await ctx.react(emoji as Parameters<typeof ctx.react>[0]);
+      } catch {
+        if (emoji !== "👍") await ctx.react("👍").catch(() => {});
+      }
+    },
   };
+
+  // In a forum supergroup every topic message carries `message_thread_id`; the "General" topic does not.
+  const topicId = msg.is_topic_message ? msg.message_thread_id : undefined;
+  const replyFrom = msg.reply_to_message?.from;
 
   return {
     bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
@@ -262,6 +278,8 @@ function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | 
       text: msg.text,
       id: msg.message_id,
       replyToId: msg.reply_to_message?.message_id,
+      replyToFromId: replyFrom ? String(replyFrom.id) : undefined,
+      repliesToBot: replyFrom ? replyFrom.id === ctx.me?.id : undefined,
     },
     user: {
       id: String(ctx.from.id),
@@ -274,6 +292,7 @@ function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | 
       id: String(ctx.chat.id),
       type: chatType,
       title: "title" in ctx.chat ? ctx.chat.title : undefined,
+      topicId,
     },
     agent: { messages: [] },
     reply,

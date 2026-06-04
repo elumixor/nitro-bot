@@ -1,5 +1,5 @@
-import { e as BotToolDefinition } from './shared/nitro-bot.CrIQ3eEt.js';
-export { A as AnyBotTool, B as BotCommandDef, a as BotContext, b as BotEntry, c as BotPostFn, d as BotPreFn, C as ChatReply, f as CommandContext, N as NitroBotContext, T as TelegramBotConfig, g as TelegramBotInfo, h as TelegramWebhookConfig, i as botCommand, k as botPost, l as botPre, m as botTool, n as buildBotToolSet, o as defineTelegramBot, p as getBot, q as getBotContext, r as isBotToolDefinition, s as registerBot } from './shared/nitro-bot.CrIQ3eEt.js';
+import { e as BotToolDefinition } from './shared/nitro-bot.BfHVS9wy.js';
+export { A as AnyBotTool, B as BotCommandDef, a as BotContext, b as BotEntry, c as BotPostFn, d as BotPreFn, C as ChatReply, f as CommandContext, N as NitroBotContext, T as TelegramBotConfig, g as TelegramBotInfo, h as TelegramWebhookConfig, i as botCommand, k as botPost, l as botPre, m as botTool, n as buildBotToolSet, o as defineTelegramBot, p as getBot, q as getBotContext, r as isBotToolDefinition, s as registerBot } from './shared/nitro-bot.BfHVS9wy.js';
 import { ToolSet, LanguageModel } from 'ai';
 import { z } from 'zod';
 import * as h3 from 'h3';
