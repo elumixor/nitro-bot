@@ -16,6 +16,7 @@ function botTool(def) {
     name: def.name,
     description: def.description,
     input: def.input ?? {},
+    hidden: def.hidden,
     execute: def.execute
   };
 }
@@ -58,6 +59,8 @@ const sendFileBuiltin = botTool({
 });
 const reactBuiltin = botTool({
   name: "react",
+  // Reacting is an acknowledgement, not an action worth narrating — keep it out of the tool trail.
+  hidden: true,
   description: "React to the user's current message with an emoji (e.g. to acknowledge it's handled) instead of sending text. Telegram allows only a fixed set: \u{1F44D} \u{1F44E} \u2764 \u{1F525} \u{1F389} \u{1F64F} \u{1F44C} \u{1F4AF} \u{1F3C6} (\u2705 is NOT allowed and becomes \u{1F44D}). Defaults to \u{1F44D}.",
   input: { emoji: z.string().nullable().describe("Reaction emoji from Telegram's allowed set, or null for \u{1F44D}.") },
   execute: async ({ emoji }, ctx) => {

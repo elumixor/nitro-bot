@@ -2,8 +2,8 @@ import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
 import { streamText, stepCountIs } from 'ai';
 import { useState, useEffect, createElement } from 'react';
-import { s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, e as registerBot } from './shared/nitro-bot.CPqsWG-G.mjs';
-export { g as getBot, d as getBotContext } from './shared/nitro-bot.CPqsWG-G.mjs';
+import { s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, e as registerBot } from './shared/nitro-bot.sKwRz0EI.mjs';
+export { g as getBot, d as getBotContext } from './shared/nitro-bot.sKwRz0EI.mjs';
 import { TelegramRenderer } from '@elumixor/react-telegram';
 import { Bot, InputFile } from 'grammy';
 import 'node:fs/promises';
@@ -22,12 +22,13 @@ function compose(reasoning, toolLines, answer) {
   if (answer) sections.push(answer);
   return sections.join("\n\n") || "\u2026";
 }
-function AgentReply({ messages, system, tools, model, maxSteps, onFinish }) {
+function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish }) {
   const [body, setBody] = useState("\u2026");
   const [errored, setErrored] = useState(null);
   const finish = useFinishRender();
   useEffect(() => {
     let cancelled = false;
+    const hidden = new Set(hiddenTools ?? []);
     void (async () => {
       let reasoning = "";
       let answer = "";
@@ -57,7 +58,7 @@ function AgentReply({ messages, system, tools, model, maxSteps, onFinish }) {
               render();
               break;
             case "tool-call":
-              if (part.toolName) toolLines.push(`\u{1F527} \`${part.toolName}\``);
+              if (part.toolName && !hidden.has(part.toolName)) toolLines.push(`\u{1F527} \`${part.toolName}\``);
               render();
               break;
             case "error":
@@ -85,7 +86,7 @@ function AgentReply({ messages, system, tools, model, maxSteps, onFinish }) {
     return () => {
       cancelled = true;
     };
-  }, [messages, system, tools, model, maxSteps, finish, onFinish]);
+  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish]);
   if (errored) return /* @__PURE__ */ jsxs(Message, { children: [
     "\u26A0\uFE0F ",
     errored
@@ -102,7 +103,7 @@ function StaticReply({ text }) {
 
 const defineNitroPlugin = (fn) => fn;
 function startTelegramBot(options) {
-  const { botConfig, pre, post, tools, botTools = [], commands = [], chatConfig } = options;
+  const { botConfig, pre, post, tools, botTools = [], toolRoutes = [], commands = [], chatConfig } = options;
   const { draftStreaming = true, webhook, onStart } = botConfig;
   if (!botConfig.bot && !botConfig.token)
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
@@ -113,6 +114,10 @@ function startTelegramBot(options) {
     ...botConfig.builtins?.react === false ? [] : [reactBuiltin]
   ];
   const allTools = { ...tools, ...buildBotToolSet([...builtins, ...botTools]) };
+  const hiddenTools = [
+    ...[...builtins, ...botTools].filter((t) => t.hidden).map((t) => t.name),
+    ...toolRoutes.filter((r) => r.module.definition.hidden).map((r) => r.module.definition.name)
+  ];
   const namedCommands = commands.filter((c) => Boolean(c.name));
   return defineNitroPlugin(async (nitroApp) => {
     bot.catch((err) => {
@@ -169,6 +174,7 @@ function startTelegramBot(options) {
               messages,
               system: botCtx.agent.systemPrompt,
               tools: allTools,
+              hiddenTools,
               model: chatConfig.model,
               maxSteps: chatConfig.maxSteps,
               onFinish: async (result) => {

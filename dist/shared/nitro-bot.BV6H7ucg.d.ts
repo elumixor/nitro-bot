@@ -1,7 +1,9 @@
 import { Bot } from 'grammy';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { ModelMessage, ToolSet } from 'ai';
+import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import { z } from 'zod';
+import * as h3 from 'h3';
+import { EventHandler } from 'h3';
 
 type TelegramWebhookConfig = {
     /** Public URL Telegram should POST updates to. Must resolve to this app's `/<botName>/webhook` route. */
@@ -172,6 +174,8 @@ type BotToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
     name: string;
     description: string;
     input: I;
+    /** When true, the call is not surfaced in the reply's `🔧 <name>` trail (e.g. `react`). */
+    hidden?: boolean;
     execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 };
 declare function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
@@ -179,6 +183,8 @@ declare function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
     description: string;
     /** Use `.nullable()` (not `.optional()`) for optional fields — LLM tool schemas reject optional. */
     input?: I;
+    /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
+    hidden?: boolean;
     execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 }): BotToolDefinition<I>;
 declare function isBotToolDefinition(value: unknown): value is BotToolDefinition;
@@ -190,10 +196,78 @@ type AnyBotTool = {
     name: string;
     description: string;
     input: z.ZodRawShape;
+    hidden?: boolean;
     execute: (input: never, ctx: BotContext) => unknown | Promise<unknown>;
 };
 /** Convert bot-local tool definitions into an AI SDK ToolSet that pulls the live BotContext at call time. */
 declare function buildBotToolSet(defs: readonly AnyBotTool[]): ToolSet;
+
+type RequestSource = "query" | "json" | "form";
+type ChatConfig = {
+    /** HTTP endpoint mounted on the Nitro app for the plain JSON chat API. */
+    endpoint?: string;
+    source?: RequestSource;
+    field?: string;
+    model?: LanguageModel;
+    maxSteps?: number;
+    /** System prompt for the HTTP `/chat` endpoint. (Bots set their own via pre-middleware.) */
+    systemPrompt?: string;
+    /** Directory scanned for bot definitions. Defaults to `src/bots`. */
+    botsDir?: string;
+};
+type ResolvedChatConfig = Required<Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir">> & Pick<ChatConfig, "systemPrompt">;
+declare function resolveChatConfig(config: ChatConfig | undefined): ResolvedChatConfig;
+
+declare const TOOL_BRAND: unique symbol;
+type ToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
+    readonly [TOOL_BRAND]: true;
+    name: string;
+    description: string;
+    input: I;
+    /** When true, the call is not surfaced in the reply's `🔧 <name>` trail. */
+    hidden?: boolean;
+};
+type ToolInput<T> = T extends ToolDefinition<infer I> ? I : never;
+declare function tool<I extends z.ZodRawShape = Record<string, never>>(def: {
+    name: string;
+    description: string;
+    input?: I;
+    /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
+    hidden?: boolean;
+}): ToolDefinition<I>;
+declare function isToolDefinition(value: unknown): value is ToolDefinition;
+
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+type ToolRoute = {
+    method: HttpMethod;
+    path: string;
+    module: {
+        definition: ToolDefinition;
+    };
+    /** Auto-extracted body/query zod shape. Used only when the tool's own `definition.input` is empty. */
+    autoInput?: z.ZodRawShape;
+    /** Zod shape for the dynamic path segments (`[id]`). Always merged into the tool input, even when `definition.input` is set. */
+    paramsInput?: z.ZodRawShape;
+    /** Names of dynamic path segments (`[id]` → `"id"`). Pulled out of the tool input and routed to `event.context.params`. */
+    params?: string[];
+};
+type InvokeFn = (route: ToolRoute, input: unknown) => unknown | Promise<unknown>;
+type ChatOptions = {
+    tools: ToolRoute[];
+    model?: LanguageModel;
+    systemPrompt?: string;
+    maxSteps?: number;
+    invoke?: InvokeFn;
+    source?: RequestSource;
+    field?: string;
+};
+type ChatResponse = {
+    text: string;
+    steps: number;
+};
+declare function buildToolSet(routes: ToolRoute[], invoke: InvokeFn): ToolSet;
+declare function createChatHandler(options: ChatOptions): EventHandler<h3.EventHandlerRequest, Promise<ChatResponse>>;
+declare function defaultInvoke(route: ToolRoute, input: unknown): Promise<unknown>;
 
 type CommandContext = BotContext & {
     /** Text after the command, trimmed (e.g. "/pay 100 usd" → "100 usd"). */
@@ -221,5 +295,5 @@ declare function registerBot(name: string, entry: BotEntry): void;
 /** Reach a running bot from anywhere (routes, webhooks, plugins). Omit `name` to get the first one. */
 declare function getBot(name?: string): BotEntry | undefined;
 
-export { botCommand as i, botContextStorage as j, botPost as k, botPre as l, botTool as m, buildBotToolSet as n, defineTelegramBot as o, getBot as p, getBotContext as q, isBotToolDefinition as r, registerBot as s };
-export type { AnyBotTool as A, BotCommandDef as B, ChatReply as C, NitroBotContext as N, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, CommandContext as f, TelegramBotInfo as g, TelegramWebhookConfig as h };
+export { getBotContext as D, isBotToolDefinition as E, isToolDefinition as F, registerBot as G, resolveChatConfig as J, tool as K, botCommand as p, botContextStorage as q, botPost as r, botPre as s, botTool as t, buildBotToolSet as u, buildToolSet as v, createChatHandler as w, defaultInvoke as x, defineTelegramBot as y, getBot as z };
+export type { AnyBotTool as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, ChatOptions as f, ChatReply as g, ChatResponse as h, CommandContext as i, ResolvedChatConfig as j, TelegramBotInfo as k, TelegramWebhookConfig as l, ToolDefinition as m, ToolInput as n, ToolRoute as o };
