@@ -33,6 +33,8 @@ export const sendFileBuiltin = botTool({
  */
 export const reactBuiltin = botTool({
   name: "react",
+  // Reacting is an acknowledgement, not an action worth narrating — keep it out of the tool trail.
+  hidden: true,
   description:
     "React to the user's current message with an emoji (e.g. to acknowledge it's handled) instead of sending text. " +
     "Telegram allows only a fixed set: 👍 👎 ❤ 🔥 🎉 🙏 👌 💯 🏆 (✅ is NOT allowed and becomes 👍). Defaults to 👍.",

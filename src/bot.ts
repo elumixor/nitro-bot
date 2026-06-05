@@ -7,6 +7,7 @@ import { AgentReply, StaticReply } from "./agent-reply";
 import { botContextStorage } from "./als";
 import { type AnyBotTool, buildBotToolSet } from "./bot-tool";
 import { reactBuiltin, sendFileBuiltin } from "./builtins";
+import type { ToolRoute } from "./chat-handler";
 import type { BotCommandDef, CommandContext } from "./command";
 import { registerBot } from "./registry";
 import type { BotContext, BotPostFn, BotPreFn, ChatReply } from "./types";
@@ -23,6 +24,8 @@ export type StartTelegramBotOptions = {
   tools: ToolSet;
   /** Chat-only tools discovered under `src/bots/<name>/tools` (can send files, etc.). */
   botTools?: AnyBotTool[];
+  /** Route tool metadata — only consulted for per-tool flags like `hidden` (the runnable set is `tools`). */
+  toolRoutes?: ToolRoute[];
   /** Slash commands discovered under `src/bots/<name>/commands` — run directly, bypassing the agent. */
   commands?: BotCommandDef[];
   /** Registry key — the bot folder name (e.g. "telegram"). Used by getBot() and the webhook route. */
@@ -31,7 +34,7 @@ export type StartTelegramBotOptions = {
 };
 
 export function startTelegramBot(options: StartTelegramBotOptions) {
-  const { botConfig, pre, post, tools, botTools = [], commands = [], chatConfig } = options;
+  const { botConfig, pre, post, tools, botTools = [], toolRoutes = [], commands = [], chatConfig } = options;
   const { draftStreaming = true, webhook, onStart } = botConfig;
   if (!botConfig.bot && !botConfig.token)
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
@@ -43,6 +46,12 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
     ...(botConfig.builtins?.react === false ? [] : [reactBuiltin]),
   ];
   const allTools: ToolSet = { ...tools, ...buildBotToolSet([...builtins, ...botTools]) };
+
+  // Tools flagged `hidden` (e.g. `react`) still run, but their call isn't narrated in the `🔧 <name>` trail.
+  const hiddenTools = [
+    ...[...builtins, ...botTools].filter((t) => t.hidden).map((t) => t.name),
+    ...toolRoutes.filter((r) => r.module.definition.hidden).map((r) => r.module.definition.name),
+  ];
 
   // The module fills `name` from the file name; only commands with a resolved name can be registered.
   const namedCommands = commands.filter((c): c is BotCommandDef & { name: string } => Boolean(c.name));
@@ -115,6 +124,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
               messages,
               system: botCtx.agent.systemPrompt,
               tools: allTools,
+              hiddenTools,
               model: chatConfig.model,
               maxSteps: chatConfig.maxSteps,
               onFinish: async (result) => {

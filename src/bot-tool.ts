@@ -16,6 +16,8 @@ export type BotToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
   name: string;
   description: string;
   input: I;
+  /** When true, the call is not surfaced in the reply's `🔧 <name>` trail (e.g. `react`). */
+  hidden?: boolean;
   execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 };
 
@@ -24,6 +26,8 @@ export function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
   description: string;
   /** Use `.nullable()` (not `.optional()`) for optional fields — LLM tool schemas reject optional. */
   input?: I;
+  /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
+  hidden?: boolean;
   execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 }): BotToolDefinition<I> {
   return {
@@ -31,6 +35,7 @@ export function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
     name: def.name,
     description: def.description,
     input: def.input ?? ({} as I),
+    hidden: def.hidden,
     execute: def.execute,
   };
 }
@@ -47,6 +52,7 @@ export type AnyBotTool = {
   name: string;
   description: string;
   input: z.ZodRawShape;
+  hidden?: boolean;
   execute: (input: never, ctx: BotContext) => unknown | Promise<unknown>;
 };
 

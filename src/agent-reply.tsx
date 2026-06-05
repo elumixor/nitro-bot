@@ -7,6 +7,8 @@ export type AgentReplyProps = {
   /** System prompt (preferred over `role: "system"` messages). Set via `ctx.agent.systemPrompt`. */
   system?: string;
   tools: ToolSet;
+  /** Tool names whose calls are not shown in the `🔧 <name>` trail (e.g. `react`). */
+  hiddenTools?: readonly string[];
   model: LanguageModel;
   maxSteps?: number;
   /** Called when the stream finishes — passes the final text + step count back so callers can run post-middleware. */
@@ -28,13 +30,14 @@ function compose(reasoning: string, toolLines: string[], answer: string): string
   return sections.join("\n\n") || "…";
 }
 
-export function AgentReply({ messages, system, tools, model, maxSteps, onFinish }: AgentReplyProps) {
+export function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish }: AgentReplyProps) {
   const [body, setBody] = useState("…");
   const [errored, setErrored] = useState<string | null>(null);
   const finish = useFinishRender();
 
   useEffect(() => {
     let cancelled = false;
+    const hidden = new Set(hiddenTools ?? []);
     void (async () => {
       let reasoning = "";
       let answer = "";
@@ -69,7 +72,7 @@ export function AgentReply({ messages, system, tools, model, maxSteps, onFinish 
               render();
               break;
             case "tool-call":
-              if (part.toolName) toolLines.push(`🔧 \`${part.toolName}\``);
+              if (part.toolName && !hidden.has(part.toolName)) toolLines.push(`🔧 \`${part.toolName}\``);
               render();
               break;
             case "error":
@@ -97,7 +100,7 @@ export function AgentReply({ messages, system, tools, model, maxSteps, onFinish 
     return () => {
       cancelled = true;
     };
-  }, [messages, system, tools, model, maxSteps, finish, onFinish]);
+  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish]);
 
   if (errored) return <Message>⚠️ {errored}</Message>;
   return <Message>{body}</Message>;
