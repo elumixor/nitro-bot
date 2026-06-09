@@ -138,6 +138,8 @@ type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
             text: string;
             steps: number;
         };
+        /** Set by the renderer; subagent tool calls report a `↳ 🔧 name` trail line through it. Internal. */
+        reportToolLine?: (line: string) => void;
     };
     /** Send files/photos/text to the current thread. Available inside bot-local tools and middleware. */
     reply: ChatReply;
@@ -176,6 +178,8 @@ type BotToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
     input: I;
     /** When true, the call is not surfaced in the reply's `🔧 <name>` trail (e.g. `react`). */
     hidden?: boolean;
+    /** Assign this tool to a subagent group. Omit to keep it shared across the coordinator and all subagents. */
+    subagent?: string;
     execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 };
 declare function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
@@ -185,6 +189,8 @@ declare function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
     input?: I;
     /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
     hidden?: boolean;
+    /** Assign this tool to a subagent group. Omit to keep it shared across the coordinator and all subagents. */
+    subagent?: string;
     execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 }): BotToolDefinition<I>;
 declare function isBotToolDefinition(value: unknown): value is BotToolDefinition;
@@ -197,6 +203,7 @@ type AnyBotTool = {
     description: string;
     input: z.ZodRawShape;
     hidden?: boolean;
+    subagent?: string;
     execute: (input: never, ctx: BotContext) => unknown | Promise<unknown>;
 };
 /** Convert bot-local tool definitions into an AI SDK ToolSet that pulls the live BotContext at call time. */
@@ -226,6 +233,12 @@ type ToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
     input: I;
     /** When true, the call is not surfaced in the reply's `🔧 <name>` trail. */
     hidden?: boolean;
+    /**
+     * Assigns this tool to a subagent (see {@link defineSubagent}). The coordinator reaches it only by
+     * delegating to that subagent. Omit to keep the tool shared — available to the coordinator and every
+     * subagent. Ignored when the bot declares no subagents.
+     */
+    subagent?: string;
 };
 type ToolInput<T> = T extends ToolDefinition<infer I> ? I : never;
 declare function tool<I extends z.ZodRawShape = Record<string, never>>(def: {
@@ -234,6 +247,8 @@ declare function tool<I extends z.ZodRawShape = Record<string, never>>(def: {
     input?: I;
     /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
     hidden?: boolean;
+    /** Assign this tool to a subagent group. Omit to keep it shared across the coordinator and all subagents. */
+    subagent?: string;
 }): ToolDefinition<I>;
 declare function isToolDefinition(value: unknown): value is ToolDefinition;
 
@@ -295,5 +310,38 @@ declare function registerBot(name: string, entry: BotEntry): void;
 /** Reach a running bot from anywhere (routes, webhooks, plugins). Omit `name` to get the first one. */
 declare function getBot(name?: string): BotEntry | undefined;
 
-export { getBotContext as D, isBotToolDefinition as E, isToolDefinition as F, registerBot as G, resolveChatConfig as J, tool as K, botCommand as p, botContextStorage as q, botPost as r, botPre as s, botTool as t, buildBotToolSet as u, buildToolSet as v, createChatHandler as w, defaultInvoke as x, defineTelegramBot as y, getBot as z };
-export type { AnyBotTool as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, ChatOptions as f, ChatReply as g, ChatResponse as h, CommandContext as i, ResolvedChatConfig as j, TelegramBotInfo as k, TelegramWebhookConfig as l, ToolDefinition as m, ToolInput as n, ToolRoute as o };
+declare const SUBAGENT_BRAND: unique symbol;
+/**
+ * A focused agent that owns a subset of the bot's tools. The coordinator (the bot's top-level agent)
+ * sees one `delegate_to_<name>` tool per subagent — its `description` is the routing signal — and hands
+ * a self-contained task to it. The subagent then runs its own agent loop over only its tools (plus the
+ * shared, untagged tools), keeping the coordinator's tool surface small.
+ *
+ * Declare these under `src/bots/<name>/subagents/*.ts`; the file name is the default `name`
+ * (`subagents/time.ts` → "time"), overridable by setting `name` explicitly. Tag a route/bot tool into a
+ * subagent with `subagent: "<name>"` on its `tool({...})` / `botTool({...})` definition.
+ */
+type SubagentDefinition = {
+    readonly [SUBAGENT_BRAND]: true;
+    /** Group key. Tools tagged `subagent: "<name>"` belong to this subagent. Defaults to the file name. */
+    name: string;
+    /** Shown to the coordinator as the `delegate_to_<name>` tool description — make it a clear routing signal. */
+    description: string;
+    /** System prompt for the subagent's own loop. Falls back to a generic instruction when omitted. */
+    systemPrompt?: string;
+    /** Gateway model id override (defaults to the bot's model). */
+    model?: string;
+    /** Max agent steps for the subagent's own loop (defaults to the bot's maxSteps). */
+    maxSteps?: number;
+};
+declare function defineSubagent(def: {
+    name?: string;
+    description: string;
+    systemPrompt?: string;
+    model?: string;
+    maxSteps?: number;
+}): SubagentDefinition;
+declare function isSubagentDefinition(value: unknown): value is SubagentDefinition;
+
+export { getBot as D, getBotContext as E, isBotToolDefinition as F, isSubagentDefinition as G, isToolDefinition as J, registerBot as K, resolveChatConfig as L, tool as M, botCommand as p, botContextStorage as q, botPost as r, botPre as s, botTool as t, buildBotToolSet as u, buildToolSet as v, createChatHandler as w, defaultInvoke as x, defineSubagent as y, defineTelegramBot as z };
+export type { AnyBotTool as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, SubagentDefinition as S, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, ChatOptions as f, ChatReply as g, ChatResponse as h, CommandContext as i, ResolvedChatConfig as j, TelegramBotInfo as k, TelegramWebhookConfig as l, ToolDefinition as m, ToolInput as n, ToolRoute as o };

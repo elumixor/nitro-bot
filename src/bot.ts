@@ -10,6 +10,8 @@ import { reactBuiltin, sendFileBuiltin } from "./builtins";
 import type { ToolRoute } from "./chat-handler";
 import type { BotCommandDef, CommandContext } from "./command";
 import { registerBot } from "./registry";
+import type { SubagentDefinition } from "./subagent";
+import { buildCoordinatorTools, delegationGuide } from "./supervisor";
 import type { BotContext, BotPostFn, BotPreFn, ChatReply } from "./types";
 
 type ExecutableTool = { execute?: (input: unknown, options: unknown) => Promise<unknown> };
@@ -28,13 +30,25 @@ export type StartTelegramBotOptions = {
   toolRoutes?: ToolRoute[];
   /** Slash commands discovered under `src/bots/<name>/commands` — run directly, bypassing the agent. */
   commands?: BotCommandDef[];
+  /** Subagents discovered under `src/bots/<name>/subagents` — tools tagged `subagent: "<name>"` route to these. */
+  subagents?: SubagentDefinition[];
   /** Registry key — the bot folder name (e.g. "telegram"). Used by getBot() and the webhook route. */
   name?: string;
   chatConfig: { model: LanguageModel; maxSteps: number };
 };
 
 export function startTelegramBot(options: StartTelegramBotOptions) {
-  const { botConfig, pre, post, tools, botTools = [], toolRoutes = [], commands = [], chatConfig } = options;
+  const {
+    botConfig,
+    pre,
+    post,
+    tools,
+    botTools = [],
+    toolRoutes = [],
+    commands = [],
+    subagents = [],
+    chatConfig,
+  } = options;
   const { draftStreaming = true, webhook, onStart } = botConfig;
   if (!botConfig.bot && !botConfig.token)
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
@@ -45,13 +59,34 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
     ...(botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin]),
     ...(botConfig.builtins?.react === false ? [] : [reactBuiltin]),
   ];
-  const allTools: ToolSet = { ...tools, ...buildBotToolSet([...builtins, ...botTools]) };
+  const allBotTools = [...builtins, ...botTools];
+  const allTools: ToolSet = { ...tools, ...buildBotToolSet(allBotTools) };
 
   // Tools flagged `hidden` (e.g. `react`) still run, but their call isn't narrated in the `🔧 <name>` trail.
   const hiddenTools = [
-    ...[...builtins, ...botTools].filter((t) => t.hidden).map((t) => t.name),
+    ...allBotTools.filter((t) => t.hidden).map((t) => t.name),
     ...toolRoutes.filter((r) => r.module.definition.hidden).map((r) => r.module.definition.name),
   ];
+
+  // Supervisor/handoff routing: when subagents are declared, the coordinator only sees shared (untagged)
+  // tools plus one `delegate_to_<name>` handoff per subagent; each handoff runs a nested agent over the
+  // subagent's own tools. With no subagents, the coordinator keeps the full flat tool set (backward compatible).
+  const toolSubagent = new Map<string, string>();
+  for (const r of toolRoutes)
+    if (r.module.definition.subagent) toolSubagent.set(r.module.definition.name, r.module.definition.subagent);
+  for (const t of allBotTools) if (t.subagent) toolSubagent.set(t.name, t.subagent);
+
+  const coordinatorTools =
+    subagents.length > 0
+      ? buildCoordinatorTools({
+          subagents,
+          allTools,
+          toolSubagent,
+          hiddenTools: new Set(hiddenTools),
+          model: chatConfig.model,
+          maxSteps: chatConfig.maxSteps,
+        })
+      : allTools;
 
   // The module fills `name` from the file name; only commands with a resolved name can be registered.
   const namedCommands = commands.filter((c): c is BotCommandDef & { name: string } => Boolean(c.name));
@@ -108,6 +143,12 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
           if (result === false) return;
         }
 
+        // With subagents declared, teach the coordinator to delegate (appended after middleware sets the base prompt).
+        if (subagents.length > 0) {
+          const guide = delegationGuide(subagents);
+          botCtx.agent.systemPrompt = botCtx.agent.systemPrompt ? `${botCtx.agent.systemPrompt}\n\n${guide}` : guide;
+        }
+
         const messages: ModelMessage[] = [...botCtx.agent.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "user" || last.content !== botCtx.message.text) {
@@ -123,7 +164,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
             createElement(AgentReply, {
               messages,
               system: botCtx.agent.systemPrompt,
-              tools: allTools,
+              tools: coordinatorTools,
               hiddenTools,
               model: chatConfig.model,
               maxSteps: chatConfig.maxSteps,

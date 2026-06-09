@@ -18,6 +18,8 @@ export type BotToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
   input: I;
   /** When true, the call is not surfaced in the reply's `🔧 <name>` trail (e.g. `react`). */
   hidden?: boolean;
+  /** Assign this tool to a subagent group. Omit to keep it shared across the coordinator and all subagents. */
+  subagent?: string;
   execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 };
 
@@ -28,6 +30,8 @@ export function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
   input?: I;
   /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
   hidden?: boolean;
+  /** Assign this tool to a subagent group. Omit to keep it shared across the coordinator and all subagents. */
+  subagent?: string;
   execute: (input: z.infer<z.ZodObject<I>>, ctx: BotContext) => unknown | Promise<unknown>;
 }): BotToolDefinition<I> {
   return {
@@ -36,6 +40,7 @@ export function botTool<I extends z.ZodRawShape = Record<string, never>>(def: {
     description: def.description,
     input: def.input ?? ({} as I),
     hidden: def.hidden,
+    subagent: def.subagent,
     execute: def.execute,
   };
 }
@@ -53,6 +58,7 @@ export type AnyBotTool = {
   description: string;
   input: z.ZodRawShape;
   hidden?: boolean;
+  subagent?: string;
   execute: (input: never, ctx: BotContext) => unknown | Promise<unknown>;
 };
 

@@ -88,6 +88,44 @@ curl -X POST localhost:3000/chat \
   -d '{"message":"what is the weather in berlin"}'
 ```
 
+## Group tools into subagents
+
+When a bot grows past a dozen or so tools, one agent juggling all of them gets slower and picks the wrong tool more often. Group related tools under a **subagent**: the top-level agent (the coordinator) then sees a single `delegate_to_<name>` tool per group instead of every tool at once, and hands the work off.
+
+Declare a subagent under `src/bots/<name>/subagents/*.ts` — the file name is the group key:
+
+```ts
+// src/bots/telegram/subagents/weather.ts
+import { defineSubagent } from "@elumixor/nitro-bot";
+
+export default defineSubagent({
+  // name defaults to the file name ("weather"); the description is what the coordinator routes on
+  description: "Weather lookups — current temperature for a city.",
+  systemPrompt: "You answer weather questions. Look up the city and report the temperature plainly.",
+  // optional: model, maxSteps overrides for this subagent's own loop
+});
+```
+
+Tag any route tool or bot-local tool into it with `subagent: "<name>"`:
+
+```ts
+export const definition = tool({
+  name: "get_weather",
+  description: "Get the current weather for a city.",
+  input: { city: z.string() },
+  subagent: "weather", // reached only via delegate_to_weather
+});
+```
+
+How it routes:
+
+- **Coordinator** runs with the shared (untagged) tools plus one `delegate_to_<name>` per subagent. It calls a delegate with a self-contained `task` string.
+- **Subagent** runs its own agent loop over its tagged tools _plus_ the shared tools, then returns a summary to the coordinator.
+- **Untagged tools are shared** — available to the coordinator and to every subagent. Keep cross-cutting lookups (resolve-a-person, send-a-file, remember) untagged so every layer can use them.
+- The live `🔧` trail nests subagent calls under the delegate that triggered them.
+
+Declare no subagents and nothing changes — the coordinator keeps the full flat tool set (fully backward compatible).
+
 ## Configuration
 
 `nitroBotModule({...})` accepts:

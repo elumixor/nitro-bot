@@ -9,6 +9,12 @@ export type ToolDefinition<I extends z.ZodRawShape = z.ZodRawShape> = {
   input: I;
   /** When true, the call is not surfaced in the reply's `🔧 <name>` trail. */
   hidden?: boolean;
+  /**
+   * Assigns this tool to a subagent (see {@link defineSubagent}). The coordinator reaches it only by
+   * delegating to that subagent. Omit to keep the tool shared — available to the coordinator and every
+   * subagent. Ignored when the bot declares no subagents.
+   */
+  subagent?: string;
 };
 
 export type ToolInput<T> = T extends ToolDefinition<infer I> ? I : never;
@@ -19,6 +25,8 @@ export function tool<I extends z.ZodRawShape = Record<string, never>>(def: {
   input?: I;
   /** When true, hide this tool's call from the reply's `🔧 <name>` trail (the model still calls it normally). */
   hidden?: boolean;
+  /** Assign this tool to a subagent group. Omit to keep it shared across the coordinator and all subagents. */
+  subagent?: string;
 }): ToolDefinition<I> {
   return {
     [TOOL_BRAND]: true,
@@ -26,6 +34,7 @@ export function tool<I extends z.ZodRawShape = Record<string, never>>(def: {
     description: def.description,
     input: def.input ?? ({} as I),
     hidden: def.hidden,
+    subagent: def.subagent,
   };
 }
 

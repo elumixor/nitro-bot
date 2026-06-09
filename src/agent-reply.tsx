@@ -1,6 +1,7 @@
 import { Message, useFinishRender } from "@elumixor/react-message-renderer";
 import { type LanguageModel, type ModelMessage, stepCountIs, streamText, type ToolSet } from "ai";
 import { useEffect, useState } from "react";
+import { getBotContext } from "./als";
 
 export type AgentReplyProps = {
   messages: ModelMessage[];
@@ -47,6 +48,15 @@ export function AgentReply({ messages, system, tools, hiddenTools, model, maxSte
       const render = () => {
         if (!cancelled) setBody(compose(reasoning, toolLines, answer));
       };
+
+      // Subagent (handoff) tool calls happen inside a delegate tool's execute, off the coordinator's stream.
+      // The supervisor reports them here so they still appear in the live `🔧` trail, nested under the delegate.
+      const ctx = getBotContext();
+      if (ctx)
+        ctx.agent.reportToolLine = (line: string) => {
+          toolLines.push(line);
+          render();
+        };
 
       try {
         // System prompt goes to the dedicated `system` option (set via ctx.agent.systemPrompt),

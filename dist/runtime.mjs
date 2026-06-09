@@ -1,14 +1,14 @@
 import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
-import { streamText, stepCountIs } from 'ai';
+import { streamText, stepCountIs, tool } from 'ai';
 import { useState, useEffect, createElement } from 'react';
-import { s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, e as registerBot } from './shared/nitro-bot.sKwRz0EI.mjs';
-export { g as getBot, d as getBotContext } from './shared/nitro-bot.sKwRz0EI.mjs';
+import { d as getBotContext, f as runAgent, s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, e as registerBot } from './shared/nitro-bot.LsCi58JG.mjs';
+export { g as getBot } from './shared/nitro-bot.LsCi58JG.mjs';
 import { TelegramRenderer } from '@elumixor/react-telegram';
 import { Bot, InputFile } from 'grammy';
+import { z } from 'zod';
 import 'node:fs/promises';
 import 'node:path';
-import 'zod';
 import 'node:async_hooks';
 
 const MAX_REASONING_PREVIEW = 300;
@@ -37,6 +37,12 @@ function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onF
       const render = () => {
         if (!cancelled) setBody(compose(reasoning, toolLines, answer));
       };
+      const ctx = getBotContext();
+      if (ctx)
+        ctx.agent.reportToolLine = (line) => {
+          toolLines.push(line);
+          render();
+        };
       try {
         const result = streamText({
           model,
@@ -101,9 +107,90 @@ function StaticReply({ text }) {
   return /* @__PURE__ */ jsx(Message, { children: text || "\u2026" });
 }
 
+const DEFAULT_SUBAGENT_SYSTEM = "You are a focused subagent. Complete the delegated task using your tools, then reply with a concise summary of what you did \u2014 include any ids, amounts, and dates. Do not ask the user questions; act on the task exactly as given.";
+function buildCoordinatorTools(opts) {
+  const { subagents, allTools, toolSubagent, hiddenTools, model, maxSteps } = opts;
+  const declared = new Set(subagents.map((s) => s.name));
+  const shared = {};
+  const grouped = /* @__PURE__ */ new Map();
+  for (const [name, t] of Object.entries(allTools)) {
+    const sa = toolSubagent.get(name);
+    if (sa && declared.has(sa)) {
+      const set = grouped.get(sa) ?? {};
+      set[name] = t;
+      grouped.set(sa, set);
+    } else {
+      if (sa && !declared.has(sa))
+        console.warn(
+          `[nitro-bot] tool "${name}" is tagged subagent "${sa}", but no such subagent is declared \u2014 treating it as shared.`
+        );
+      shared[name] = t;
+    }
+  }
+  const coordinator = { ...shared };
+  for (const sa of subagents) {
+    const own = grouped.get(sa.name) ?? {};
+    if (Object.keys(own).length === 0)
+      console.warn(`[nitro-bot] subagent "${sa.name}" has no tools tagged to it (it will still see shared tools).`);
+    const subTools = wrapTrail({ ...own, ...shared }, hiddenTools);
+    coordinator[`delegate_to_${sa.name}`] = tool({
+      description: sa.description,
+      inputSchema: z.object({
+        task: z.string().describe(
+          "A complete, self-contained instruction for the subagent. Include every name, id, date, and amount already known from the conversation \u2014 the subagent cannot see the chat history."
+        )
+      }),
+      execute: async ({ task }) => {
+        const result = await runAgent({
+          prompt: task,
+          tools: subTools,
+          model: sa.model ?? model,
+          systemPrompt: sa.systemPrompt ?? DEFAULT_SUBAGENT_SYSTEM,
+          maxSteps: sa.maxSteps ?? maxSteps
+        });
+        return result.text;
+      }
+    });
+  }
+  return coordinator;
+}
+function wrapTrail(toolset, hidden) {
+  const out = {};
+  for (const [name, t] of Object.entries(toolset)) {
+    const original = t.execute;
+    out[name] = {
+      ...t,
+      execute: async (input, options) => {
+        if (!hidden.has(name)) getBotContext()?.agent.reportToolLine?.(`\u21B3 \u{1F527} \`${name}\``);
+        return original ? await original(input, options) : void 0;
+      }
+    };
+  }
+  return out;
+}
+function delegationGuide(subagents) {
+  const lines = subagents.map((s) => `- delegate_to_${s.name}: ${s.description}`);
+  return [
+    "You coordinate specialized subagents. For any task a subagent covers, call its delegate_to_* tool with a",
+    "complete, self-contained `task` string (include names, ids, dates, and amounts \u2014 the subagent has no chat",
+    "history). Use your own shared tools directly for quick lookups and chat actions. Subagents available:",
+    ...lines
+  ].join("\n");
+}
+
 const defineNitroPlugin = (fn) => fn;
 function startTelegramBot(options) {
-  const { botConfig, pre, post, tools, botTools = [], toolRoutes = [], commands = [], chatConfig } = options;
+  const {
+    botConfig,
+    pre,
+    post,
+    tools,
+    botTools = [],
+    toolRoutes = [],
+    commands = [],
+    subagents = [],
+    chatConfig
+  } = options;
   const { draftStreaming = true, webhook, onStart } = botConfig;
   if (!botConfig.bot && !botConfig.token)
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
@@ -113,11 +200,24 @@ function startTelegramBot(options) {
     ...botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin],
     ...botConfig.builtins?.react === false ? [] : [reactBuiltin]
   ];
-  const allTools = { ...tools, ...buildBotToolSet([...builtins, ...botTools]) };
+  const allBotTools = [...builtins, ...botTools];
+  const allTools = { ...tools, ...buildBotToolSet(allBotTools) };
   const hiddenTools = [
-    ...[...builtins, ...botTools].filter((t) => t.hidden).map((t) => t.name),
+    ...allBotTools.filter((t) => t.hidden).map((t) => t.name),
     ...toolRoutes.filter((r) => r.module.definition.hidden).map((r) => r.module.definition.name)
   ];
+  const toolSubagent = /* @__PURE__ */ new Map();
+  for (const r of toolRoutes)
+    if (r.module.definition.subagent) toolSubagent.set(r.module.definition.name, r.module.definition.subagent);
+  for (const t of allBotTools) if (t.subagent) toolSubagent.set(t.name, t.subagent);
+  const coordinatorTools = subagents.length > 0 ? buildCoordinatorTools({
+    subagents,
+    allTools,
+    toolSubagent,
+    hiddenTools: new Set(hiddenTools),
+    model: chatConfig.model,
+    maxSteps: chatConfig.maxSteps
+  }) : allTools;
   const namedCommands = commands.filter((c) => Boolean(c.name));
   return defineNitroPlugin(async (nitroApp) => {
     bot.catch((err) => {
@@ -161,6 +261,12 @@ function startTelegramBot(options) {
           const result = await fn(botCtx);
           if (result === false) return;
         }
+        if (subagents.length > 0) {
+          const guide = delegationGuide(subagents);
+          botCtx.agent.systemPrompt = botCtx.agent.systemPrompt ? `${botCtx.agent.systemPrompt}
+
+${guide}` : guide;
+        }
         const messages = [...botCtx.agent.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "user" || last.content !== botCtx.message.text) {
@@ -173,7 +279,7 @@ function startTelegramBot(options) {
             createElement(AgentReply, {
               messages,
               system: botCtx.agent.systemPrompt,
-              tools: allTools,
+              tools: coordinatorTools,
               hiddenTools,
               model: chatConfig.model,
               maxSteps: chatConfig.maxSteps,
@@ -324,4 +430,4 @@ function buildBotContext(ctx, config) {
   };
 }
 
-export { AgentReply, botContextStorage, registerBot, startTelegramBot };
+export { AgentReply, botContextStorage, getBotContext, registerBot, startTelegramBot };

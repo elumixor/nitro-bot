@@ -77,6 +77,8 @@ export type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
      *  dedicated `system` prompt, never interleaved into `messages`. */
     systemPrompt?: string;
     result?: { text: string; steps: number };
+    /** Set by the renderer; subagent tool calls report a `↳ 🔧 name` trail line through it. Internal. */
+    reportToolLine?: (line: string) => void;
   };
   /** Send files/photos/text to the current thread. Available inside bot-local tools and middleware. */
   reply: ChatReply;

@@ -1,8 +1,19 @@
+import { generateText, stepCountIs, tool } from 'ai';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { z } from 'zod';
-import { tool } from 'ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
+
+async function runAgent(options) {
+  const result = await generateText({
+    model: options.model,
+    system: options.systemPrompt,
+    prompt: options.prompt,
+    tools: options.tools,
+    stopWhen: stepCountIs(options.maxSteps ?? 8)
+  });
+  return { text: result.text, steps: result.steps?.length ?? 0 };
+}
 
 const botContextStorage = new AsyncLocalStorage();
 function getBotContext() {
@@ -17,6 +28,7 @@ function botTool(def) {
     description: def.description,
     input: def.input ?? {},
     hidden: def.hidden,
+    subagent: def.subagent,
     execute: def.execute
   };
 }
@@ -78,4 +90,4 @@ function getBot(name) {
   return registry.values().next().value;
 }
 
-export { botTool as a, botContextStorage as b, buildBotToolSet as c, getBotContext as d, registerBot as e, getBot as g, isBotToolDefinition as i, reactBuiltin as r, sendFileBuiltin as s };
+export { botTool as a, botContextStorage as b, buildBotToolSet as c, getBotContext as d, registerBot as e, runAgent as f, getBot as g, isBotToolDefinition as i, reactBuiltin as r, sendFileBuiltin as s };

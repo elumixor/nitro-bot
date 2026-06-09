@@ -1,7 +1,7 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import { ModelMessage, ToolSet, LanguageModel } from 'ai';
-import { T as TelegramBotConfig, d as BotPreFn, c as BotPostFn, A as AnyBotTool, o as ToolRoute, B as BotCommandDef } from './shared/nitro-bot.BV6H7ucg.js';
-export { b as BotEntry, q as botContextStorage, z as getBot, D as getBotContext, G as registerBot } from './shared/nitro-bot.BV6H7ucg.js';
+import { T as TelegramBotConfig, d as BotPreFn, c as BotPostFn, A as AnyBotTool, o as ToolRoute, B as BotCommandDef, S as SubagentDefinition } from './shared/nitro-bot.B7RkE1jc.js';
+export { b as BotEntry, q as botContextStorage, D as getBot, E as getBotContext, K as registerBot } from './shared/nitro-bot.B7RkE1jc.js';
 import 'grammy';
 import 'node:async_hooks';
 import 'zod';
@@ -40,6 +40,8 @@ type StartTelegramBotOptions = {
     toolRoutes?: ToolRoute[];
     /** Slash commands discovered under `src/bots/<name>/commands` — run directly, bypassing the agent. */
     commands?: BotCommandDef[];
+    /** Subagents discovered under `src/bots/<name>/subagents` — tools tagged `subagent: "<name>"` route to these. */
+    subagents?: SubagentDefinition[];
     /** Registry key — the bot folder name (e.g. "telegram"). Used by getBot() and the webhook route. */
     name?: string;
     chatConfig: {

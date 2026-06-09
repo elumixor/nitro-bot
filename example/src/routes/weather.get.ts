@@ -6,6 +6,7 @@ export const definition = tool({
   name: "get_weather",
   description: "Get the current weather for a city. Returns temperature in Celsius.",
   input: { city: z.string().describe("The city name, e.g. 'Berlin'") },
+  subagent: "weather",
 });
 
 const fakeForecast: Record<string, number> = {

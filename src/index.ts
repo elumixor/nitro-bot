@@ -28,6 +28,7 @@ export {
 export { type DiscoveredRoute, discoverToolRoutes } from "./discover";
 export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-module";
 export { type BotEntry, getBot, registerBot } from "./registry";
+export { defineSubagent, isSubagentDefinition, type SubagentDefinition } from "./subagent";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
 export {
   type BotContext,
