@@ -194,6 +194,46 @@ declare const botPre: <C extends Record<string, unknown> = NitroBotContext>(fn: 
 /** Identity helper that types a post-middleware function. Errors are swallowed and logged. */
 declare const botPost: <C extends Record<string, unknown> = NitroBotContext>(fn: BotPostFn<C>) => BotPostFn<C>;
 
+/** A single event from {@link runAgentEventStream}: a text chunk or a tool invocation. */
+type AgentEvent = {
+    type: "delta";
+    text: string;
+} | {
+    type: "tool";
+    name: string;
+};
+type AgentEventStreamOptions = {
+    tools: ToolSet;
+    model: LanguageModel;
+    maxSteps?: number;
+    systemPrompt?: string;
+    /** Full conversation history including the current user turn. Takes precedence over `prompt`. */
+    messages?: ModelMessage[];
+    prompt?: string;
+    /** Conversation id surfaced to tool routes as `event.context.bot.threadId`. */
+    conversationId?: string;
+    user?: {
+        id: string;
+        username?: string;
+        firstName?: string;
+        lastName?: string;
+    };
+    /** Extra fields merged onto `event.context` for tool routes (e.g. the resolved app user, draft id). */
+    context?: NitroBotContext;
+};
+/**
+ * Generator-shaped streaming agent loop: `yield`s {@link AgentEvent}s (text deltas and tool calls) and
+ * `return`s the final `{ text, steps }`. Designed to be `yield*`-ed straight out of a streaming route
+ * handler (e.g. `@elumixor/nitro-client`'s `handler(async function* …)`), giving a fully typed client
+ * `Stream` without a hand-rolled `fetch`/SSE parser.
+ *
+ * When `conversationId`/`user`/`context` are provided it runs the agent inside `botContextStorage` so
+ * tool routes read `event.context` exactly like the Telegram transport. The callback→generator bridge
+ * keeps that ALS scope alive across the whole stream (tools execute inside it, the caller drains the
+ * queue outside it).
+ */
+declare function runAgentEventStream(opts: AgentEventStreamOptions): AsyncGenerator<AgentEvent, RunAgentResult>;
+
 declare const botContextStorage: AsyncLocalStorage<BotContext>;
 /** Read the current BotContext inside any code reached by an agent invocation (tool routes, sub-handlers, etc.). */
 declare function getBotContext(): BotContext | undefined;
@@ -245,8 +285,13 @@ declare function buildBotToolSet(defs: readonly AnyBotTool[]): ToolSet;
 
 type RequestSource = "query" | "json" | "form";
 type ChatConfig = {
-    /** HTTP endpoint mounted on the Nitro app for the plain JSON chat API. */
-    endpoint?: string;
+    /**
+     * HTTP endpoint mounted on the Nitro app for the chat API. Set to `false` to NOT mount any chat
+     * handler — useful when the consumer serves `/chat` itself (e.g. a `@elumixor/nitro-client`
+     * async-generator route that delegates to `runAgentEventStream`, for a fully typed client). Tool
+     * discovery, the `#nitro-bot` runtime (`toolRoutes`/`tools`/`chatConfig`), and bots are unaffected.
+     */
+    endpoint?: string | false;
     source?: RequestSource;
     field?: string;
     model?: LanguageModel;
@@ -452,5 +497,5 @@ declare function defineSubagent(def: {
 }): SubagentDefinition;
 declare function isSubagentDefinition(value: unknown): value is SubagentDefinition;
 
-export { buildBotToolSet as D, buildToolSet as E, createChatHandler as F, createSessionChatHandler as G, defaultInvoke as J, defineChatSession as K, defineSubagent as L, defineTelegramBot as M, getBot as O, getBotContext as P, isBotToolDefinition as Q, isSubagentDefinition as U, isToolDefinition as V, registerBot as W, resolveChatConfig as X, runAgent as Y, runAgentStream as Z, tool as _, botCommand as v, botContextStorage as w, botPost as x, botPre as y, botTool as z };
-export type { AnyBotTool as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, ChatOptions as f, ChatReply as g, ChatResponse as h, ChatSessionDef as i, ChatSessionResolved as j, CommandContext as k, ResolvedChatConfig as l, RunAgentOptions as m, RunAgentResult as n, StreamAgentOptions as o, SubagentDefinition as p, TelegramBotInfo as q, TelegramWebhookConfig as r, ToolDefinition as s, ToolInput as t, ToolRoute as u };
+export { runAgentEventStream as $, botPre as D, botTool as E, buildBotToolSet as F, buildToolSet as G, createChatHandler as J, createSessionChatHandler as K, defaultInvoke as L, defineChatSession as M, defineSubagent as O, defineTelegramBot as P, getBot as Q, getBotContext as U, isBotToolDefinition as V, isSubagentDefinition as W, isToolDefinition as X, registerBot as Y, resolveChatConfig as Z, runAgent as _, runAgentStream as a0, tool as a1, botCommand as x, botContextStorage as y, botPost as z };
+export type { AgentEvent as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotContext as c, BotEntry as d, BotPostFn as e, BotPreFn as f, BotToolDefinition as g, ChatOptions as h, ChatReply as i, ChatResponse as j, ChatSessionDef as k, ChatSessionResolved as l, CommandContext as m, ResolvedChatConfig as n, RunAgentOptions as o, RunAgentResult as p, StreamAgentOptions as q, SubagentDefinition as r, TelegramBotInfo as s, TelegramWebhookConfig as t, ToolDefinition as u, ToolInput as v, ToolRoute as w };

@@ -42,17 +42,21 @@ export default function nitroBotModule(config: NitroBotModuleOptions = {}) {
       console.warn("[nitro-bot] No tool routes with `export const definition = tool(...)` found in", routesDir);
     }
 
-    const endpoint = config.endpoint ?? "/chat";
+    // `endpoint: false` means the consumer serves /chat themselves (e.g. a typed nitro-client
+    // async-generator route using runAgentEventStream). We still generate the runtime + tool set.
+    const endpoint = config.endpoint === undefined ? "/chat" : config.endpoint;
+    const mountChat = endpoint !== false;
     const source = config.source ?? "json";
     const httpMethod = source === "query" ? "GET" : "POST";
 
-    // Server-side session mode: when a session file is present, the `/chat` endpoint is backed by it
-    // (owned history, auth, per-conversation tool context) instead of the stateless handler. An explicit
+    // Server-side session mode: when a session file is present, the mounted `/chat` endpoint is backed by
+    // it (owned history, auth, per-conversation tool context) instead of the stateless handler. An explicit
     // `sessionFile` that's missing is a config error; the implicit default (`src/chat.ts`) is opt-in.
+    // Skipped entirely when the consumer owns the endpoint (`endpoint: false`).
     const sessionRel = config.sessionFile ?? "src/chat.ts";
     const sessionAbs = resolve(rootDir, sessionRel);
-    const sessionFile = (await exists(sessionAbs)) ? sessionAbs : undefined;
-    if (config.sessionFile && !sessionFile)
+    const sessionFile = mountChat && (await exists(sessionAbs)) ? sessionAbs : undefined;
+    if (mountChat && config.sessionFile && !sessionFile)
       console.warn(
         `[nitro-bot] sessionFile "${config.sessionFile}" not found at ${sessionAbs} — using stateless /chat.`,
       );
@@ -62,7 +66,8 @@ export default function nitroBotModule(config: NitroBotModuleOptions = {}) {
     const handlerFile = await writeHandlerFile({ buildDir, routes, configFile, sessionFile, stream });
     const runtimeFile = await writeRuntimeFile({ buildDir, handlerFile });
 
-    nitro.options.handlers.push({ route: endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
+    if (mountChat)
+      nitro.options.handlers.push({ route: endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
     nitro.options.alias ??= {};
     nitro.options.alias["#nitro-bot"] = runtimeFile.replace(/\.ts$/, "");
 
@@ -86,10 +91,14 @@ export default function nitroBotModule(config: NitroBotModuleOptions = {}) {
     }
 
     nitro.hooks.hook("compiled", () => {
-      const mode = sessionFile ? `session${stream ? "+stream" : ""}` : "stateless";
-      console.log(
-        `[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source}, ${mode})`,
-      );
+      if (mountChat) {
+        const mode = sessionFile ? `session${stream ? "+stream" : ""}` : "stateless";
+        console.log(
+          `[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source}, ${mode})`,
+        );
+      } else {
+        console.log(`[nitro-bot] ${routes.length} tool(s) discovered; /chat handled by the consumer (endpoint: false)`);
+      }
       for (const bot of bots) {
         console.log(
           `[nitro-bot] bot "${bot.name}": ${bot.preFiles.length} pre, ${bot.postFiles.length} post middleware, ${bot.subagentFiles.length} subagent(s)`,

@@ -11,6 +11,7 @@ export {
   runAgentStream,
   type StreamAgentOptions,
 } from "./agent";
+export { type AgentEvent, type AgentEventStreamOptions, runAgentEventStream } from "./agent-stream";
 export { getBotContext } from "./als";
 export { type AnyBotTool, type BotToolDefinition, botTool, buildBotToolSet, isBotToolDefinition } from "./bot-tool";
 export { sendFileBuiltin } from "./builtins";

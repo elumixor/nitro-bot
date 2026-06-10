@@ -3,8 +3,13 @@ import type { LanguageModel } from "ai";
 export type RequestSource = "query" | "json" | "form";
 
 export type ChatConfig = {
-  /** HTTP endpoint mounted on the Nitro app for the plain JSON chat API. */
-  endpoint?: string;
+  /**
+   * HTTP endpoint mounted on the Nitro app for the chat API. Set to `false` to NOT mount any chat
+   * handler — useful when the consumer serves `/chat` itself (e.g. a `@elumixor/nitro-client`
+   * async-generator route that delegates to `runAgentEventStream`, for a fully typed client). Tool
+   * discovery, the `#nitro-bot` runtime (`toolRoutes`/`tools`/`chatConfig`), and bots are unaffected.
+   */
+  endpoint?: string | false;
   source?: RequestSource;
   field?: string;
   model?: LanguageModel;

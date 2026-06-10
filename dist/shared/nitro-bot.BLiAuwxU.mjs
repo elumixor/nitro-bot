@@ -51,6 +51,82 @@ function getBotContext() {
   return botContextStorage.getStore();
 }
 
+const noopReply$1 = {
+  sendDocument: async () => {
+  },
+  sendPhoto: async () => {
+  },
+  sendText: async () => {
+  },
+  react: async () => {
+  }
+};
+function buildWebBotContext(opts) {
+  if (!opts.conversationId && !opts.user && !opts.context) return void 0;
+  return {
+    bot: { name: "web" },
+    message: { text: "", id: 0 },
+    user: {
+      id: opts.user?.id ?? "",
+      username: opts.user?.username,
+      firstName: opts.user?.firstName,
+      lastName: opts.user?.lastName
+    },
+    thread: { id: opts.conversationId ?? "", type: "private" },
+    agent: { messages: opts.messages ?? [], systemPrompt: opts.systemPrompt },
+    reply: noopReply$1,
+    context: opts.context ?? {}
+  };
+}
+async function* runAgentEventStream(opts) {
+  const botCtx = buildWebBotContext(opts);
+  const queue = [];
+  let notify = null;
+  const wake = () => {
+    notify?.();
+    notify = null;
+  };
+  const push = (event) => {
+    queue.push(event);
+    wake();
+  };
+  let done = false;
+  let error;
+  let result;
+  const exec = () => runAgentStream({
+    tools: opts.tools,
+    model: opts.model,
+    maxSteps: opts.maxSteps,
+    systemPrompt: opts.systemPrompt,
+    messages: opts.messages,
+    prompt: opts.prompt,
+    onDelta: (text) => push({ type: "delta", text }),
+    onToolCall: (name) => push({ type: "tool", name })
+  });
+  const runner = (botCtx ? botContextStorage.run(botCtx, exec) : exec()).then((r) => {
+    result = r;
+  }).catch((e) => {
+    error = e;
+  }).finally(() => {
+    done = true;
+    wake();
+  });
+  let i = 0;
+  while (true) {
+    while (i < queue.length) {
+      const event = queue[i++];
+      if (event) yield event;
+    }
+    if (done) break;
+    await new Promise((resolve) => {
+      notify = resolve;
+    });
+  }
+  await runner;
+  if (error) throw error;
+  return result ?? { text: "", steps: 0 };
+}
+
 const BOT_TOOL_BRAND = Symbol.for("nitro-bot.bot-tool");
 function botTool(def) {
   return {
@@ -414,4 +490,4 @@ async function persist(session, resolved, user, assistant, event) {
   }
 }
 
-export { botTool as a, botContextStorage as b, buildBotToolSet as c, buildToolSet as d, createChatHandler as e, createSessionChatHandler as f, defaultInvoke as g, getBot as h, getBotContext as i, isBotToolDefinition as j, registerBot as k, runAgent as l, runAgentStream as m, reactBuiltin as r, sendFileBuiltin as s };
+export { botTool as a, botContextStorage as b, buildBotToolSet as c, buildToolSet as d, createChatHandler as e, createSessionChatHandler as f, defaultInvoke as g, getBot as h, getBotContext as i, isBotToolDefinition as j, registerBot as k, runAgent as l, runAgentEventStream as m, runAgentStream as n, reactBuiltin as r, sendFileBuiltin as s };

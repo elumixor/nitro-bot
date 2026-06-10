@@ -1,5 +1,5 @@
-import { T as TelegramBotConfig, d as BotPreFn, c as BotPostFn, A as AnyBotTool, u as ToolRoute, B as BotCommandDef, p as SubagentDefinition } from './shared/nitro-bot.CKnZK1Sk.mjs';
-export { b as BotEntry, n as RunAgentResult, S as SessionChatOptions, o as StreamAgentOptions, w as botContextStorage, G as createSessionChatHandler, O as getBot, P as getBotContext, W as registerBot, Z as runAgentStream } from './shared/nitro-bot.CKnZK1Sk.mjs';
+import { T as TelegramBotConfig, f as BotPreFn, e as BotPostFn, b as AnyBotTool, w as ToolRoute, B as BotCommandDef, r as SubagentDefinition } from './shared/nitro-bot.CN3VpdzP.mjs';
+export { A as AgentEvent, a as AgentEventStreamOptions, d as BotEntry, p as RunAgentResult, S as SessionChatOptions, q as StreamAgentOptions, y as botContextStorage, K as createSessionChatHandler, Q as getBot, U as getBotContext, Y as registerBot, $ as runAgentEventStream, a0 as runAgentStream } from './shared/nitro-bot.CN3VpdzP.mjs';
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import 'grammy';

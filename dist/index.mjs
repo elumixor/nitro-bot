@@ -1,4 +1,4 @@
-export { a as botTool, c as buildBotToolSet, d as buildToolSet, e as createChatHandler, f as createSessionChatHandler, g as defaultInvoke, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, m as runAgentStream, s as sendFileBuiltin } from './shared/nitro-bot.33oHgLo9.mjs';
+export { a as botTool, c as buildBotToolSet, d as buildToolSet, e as createChatHandler, f as createSessionChatHandler, g as defaultInvoke, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, m as runAgentEventStream, n as runAgentStream, s as sendFileBuiltin } from './shared/nitro-bot.BLiAuwxU.mjs';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
 import { Project, Node, SyntaxKind } from 'ts-morph';
@@ -171,13 +171,14 @@ function nitroBotModule(config = {}) {
     if (routes.length === 0) {
       console.warn("[nitro-bot] No tool routes with `export const definition = tool(...)` found in", routesDir);
     }
-    const endpoint = config.endpoint ?? "/chat";
+    const endpoint = config.endpoint === void 0 ? "/chat" : config.endpoint;
+    const mountChat = endpoint !== false;
     const source = config.source ?? "json";
     const httpMethod = source === "query" ? "GET" : "POST";
     const sessionRel = config.sessionFile ?? "src/chat.ts";
     const sessionAbs = resolve(rootDir, sessionRel);
-    const sessionFile = await exists(sessionAbs) ? sessionAbs : void 0;
-    if (config.sessionFile && !sessionFile)
+    const sessionFile = mountChat && await exists(sessionAbs) ? sessionAbs : void 0;
+    if (mountChat && config.sessionFile && !sessionFile)
       console.warn(
         `[nitro-bot] sessionFile "${config.sessionFile}" not found at ${sessionAbs} \u2014 using stateless /chat.`
       );
@@ -185,7 +186,8 @@ function nitroBotModule(config = {}) {
     const configFile = await writeConfigFile({ buildDir, config });
     const handlerFile = await writeHandlerFile({ buildDir, routes, configFile, sessionFile, stream });
     const runtimeFile = await writeRuntimeFile({ buildDir, handlerFile });
-    nitro.options.handlers.push({ route: endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
+    if (mountChat)
+      nitro.options.handlers.push({ route: endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
     nitro.options.alias ??= {};
     nitro.options.alias["#nitro-bot"] = runtimeFile.replace(/\.ts$/, "");
     const bots = process.env.NITRO_BOT_DISABLE_BOTS ? [] : await discoverBots(botsDir);
@@ -202,10 +204,14 @@ function nitroBotModule(config = {}) {
       nitro.options.handlers.push({ route: "/**", middleware: true, handler: mwFile });
     }
     nitro.hooks.hook("compiled", () => {
-      const mode = sessionFile ? `session${stream ? "+stream" : ""}` : "stateless";
-      console.log(
-        `[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source}, ${mode})`
-      );
+      if (mountChat) {
+        const mode = sessionFile ? `session${stream ? "+stream" : ""}` : "stateless";
+        console.log(
+          `[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source}, ${mode})`
+        );
+      } else {
+        console.log(`[nitro-bot] ${routes.length} tool(s) discovered; /chat handled by the consumer (endpoint: false)`);
+      }
       for (const bot of bots) {
         console.log(
           `[nitro-bot] bot "${bot.name}": ${bot.preFiles.length} pre, ${bot.postFiles.length} post middleware, ${bot.subagentFiles.length} subagent(s)`

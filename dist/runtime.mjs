@@ -1,5 +1,5 @@
-import { i as getBotContext, l as runAgent, s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, k as registerBot } from './shared/nitro-bot.33oHgLo9.mjs';
-export { f as createSessionChatHandler, h as getBot, m as runAgentStream } from './shared/nitro-bot.33oHgLo9.mjs';
+import { i as getBotContext, l as runAgent, s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, k as registerBot } from './shared/nitro-bot.BLiAuwxU.mjs';
+export { f as createSessionChatHandler, h as getBot, m as runAgentEventStream, n as runAgentStream } from './shared/nitro-bot.BLiAuwxU.mjs';
 import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
 import { streamText, stepCountIs, tool } from 'ai';
