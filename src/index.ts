@@ -4,7 +4,13 @@ export {
   type TelegramBotInfo,
   type TelegramWebhookConfig,
 } from "./adapters/telegram";
-export { type RunAgentOptions, type RunAgentResult, runAgent } from "./agent";
+export {
+  type RunAgentOptions,
+  type RunAgentResult,
+  runAgent,
+  runAgentStream,
+  type StreamAgentOptions,
+} from "./agent";
 export { getBotContext } from "./als";
 export { type AnyBotTool, type BotToolDefinition, botTool, buildBotToolSet, isBotToolDefinition } from "./bot-tool";
 export { sendFileBuiltin } from "./builtins";
@@ -28,6 +34,8 @@ export {
 export { type DiscoveredRoute, discoverToolRoutes } from "./discover";
 export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-module";
 export { type BotEntry, getBot, registerBot } from "./registry";
+export { type ChatSessionDef, type ChatSessionResolved, defineChatSession } from "./session";
+export { createSessionChatHandler, type SessionChatOptions } from "./session-handler";
 export { defineSubagent, isSubagentDefinition, type SubagentDefinition } from "./subagent";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
 export {

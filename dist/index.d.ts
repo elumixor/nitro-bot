@@ -1,23 +1,10 @@
-import { e as BotToolDefinition, H as HttpMethod, C as ChatConfig } from './shared/nitro-bot.B7RkE1jc.js';
-export { A as AnyBotTool, B as BotCommandDef, a as BotContext, b as BotEntry, c as BotPostFn, d as BotPreFn, f as ChatOptions, g as ChatReply, h as ChatResponse, i as CommandContext, I as InvokeFn, N as NitroBotContext, R as RequestSource, j as ResolvedChatConfig, S as SubagentDefinition, T as TelegramBotConfig, k as TelegramBotInfo, l as TelegramWebhookConfig, m as ToolDefinition, n as ToolInput, o as ToolRoute, p as botCommand, r as botPost, s as botPre, t as botTool, u as buildBotToolSet, v as buildToolSet, w as createChatHandler, x as defaultInvoke, y as defineSubagent, z as defineTelegramBot, D as getBot, E as getBotContext, F as isBotToolDefinition, G as isSubagentDefinition, J as isToolDefinition, K as registerBot, L as resolveChatConfig, M as tool } from './shared/nitro-bot.B7RkE1jc.js';
-import { ToolSet, LanguageModel } from 'ai';
+import { e as BotToolDefinition, H as HttpMethod, C as ChatConfig } from './shared/nitro-bot.CKnZK1Sk.js';
+export { A as AnyBotTool, B as BotCommandDef, a as BotContext, b as BotEntry, c as BotPostFn, d as BotPreFn, f as ChatOptions, g as ChatReply, h as ChatResponse, i as ChatSessionDef, j as ChatSessionResolved, k as CommandContext, I as InvokeFn, N as NitroBotContext, R as RequestSource, l as ResolvedChatConfig, m as RunAgentOptions, n as RunAgentResult, S as SessionChatOptions, o as StreamAgentOptions, p as SubagentDefinition, T as TelegramBotConfig, q as TelegramBotInfo, r as TelegramWebhookConfig, s as ToolDefinition, t as ToolInput, u as ToolRoute, v as botCommand, x as botPost, y as botPre, z as botTool, D as buildBotToolSet, E as buildToolSet, F as createChatHandler, G as createSessionChatHandler, J as defaultInvoke, K as defineChatSession, L as defineSubagent, M as defineTelegramBot, O as getBot, P as getBotContext, Q as isBotToolDefinition, U as isSubagentDefinition, V as isToolDefinition, W as registerBot, X as resolveChatConfig, Y as runAgent, Z as runAgentStream, _ as tool } from './shared/nitro-bot.CKnZK1Sk.js';
 import { z } from 'zod';
 import 'grammy';
+import 'ai';
 import 'node:async_hooks';
 import 'h3';
-
-type RunAgentOptions = {
-    prompt: string;
-    tools: ToolSet;
-    model: LanguageModel;
-    systemPrompt?: string;
-    maxSteps?: number;
-};
-type RunAgentResult = {
-    text: string;
-    steps: number;
-};
-declare function runAgent(options: RunAgentOptions): Promise<RunAgentResult>;
 
 /**
  * Built-in tool auto-registered for Telegram bots (opt out via `builtins: { sendFile: false }`).
@@ -80,5 +67,5 @@ type NitroLike = {
 type NitroBotModuleOptions = ChatConfig;
 declare function nitroBotModule(config?: NitroBotModuleOptions): (nitro: NitroLike) => Promise<void>;
 
-export { BotToolDefinition, ChatConfig, HttpMethod, discoverToolRoutes, nitroBotModule, runAgent, sendFileBuiltin };
-export type { DiscoveredRoute, NitroBotModuleOptions, RunAgentOptions, RunAgentResult };
+export { BotToolDefinition, ChatConfig, HttpMethod, discoverToolRoutes, nitroBotModule, sendFileBuiltin };
+export type { DiscoveredRoute, NitroBotModuleOptions };

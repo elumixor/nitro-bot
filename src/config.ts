@@ -13,12 +13,21 @@ export type ChatConfig = {
   systemPrompt?: string;
   /** Directory scanned for bot definitions. Defaults to `src/bots`. */
   botsDir?: string;
+  /**
+   * Path (relative to the Nitro root) to a server-side chat-session file whose default export is a
+   * {@link import("./session").ChatSessionDef} (via `defineChatSession`). When set, the `/chat` endpoint
+   * is backed by that session — server-owned history, auth, and per-conversation tool context — instead
+   * of the stateless single-message handler.
+   */
+  sessionFile?: string;
+  /** Stream the `/chat` reply as Server-Sent Events (`data: {delta}` / `{done}` / `{error}`). */
+  stream?: boolean;
 };
 
 export type ResolvedChatConfig = Required<
-  Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir">
+  Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir" | "stream">
 > &
-  Pick<ChatConfig, "systemPrompt">;
+  Pick<ChatConfig, "systemPrompt" | "sessionFile">;
 
 export const DEFAULT_CONFIG: ResolvedChatConfig = {
   endpoint: "/chat",
@@ -27,6 +36,7 @@ export const DEFAULT_CONFIG: ResolvedChatConfig = {
   maxSteps: 8,
   model: "anthropic/claude-sonnet-4.6",
   botsDir: "src/bots",
+  stream: false,
 };
 
 export function resolveChatConfig(config: ChatConfig | undefined): ResolvedChatConfig {

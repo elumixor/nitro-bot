@@ -1,214 +1,14 @@
-import { f as runAgent, d as getBotContext } from './shared/nitro-bot.LsCi58JG.mjs';
-export { a as botTool, c as buildBotToolSet, g as getBot, i as isBotToolDefinition, e as registerBot, s as sendFileBuiltin } from './shared/nitro-bot.LsCi58JG.mjs';
-import { tool as tool$1, asSchema } from 'ai';
-import { defineEventHandler, getValidatedQuery, readFormData, readValidatedBody } from 'h3';
-import { z } from 'zod';
+export { a as botTool, c as buildBotToolSet, d as buildToolSet, e as createChatHandler, f as createSessionChatHandler, g as defaultInvoke, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, m as runAgentStream, s as sendFileBuiltin } from './shared/nitro-bot.33oHgLo9.mjs';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
 import { Project, Node, SyntaxKind } from 'ts-morph';
+import 'zod';
+import 'ai';
+import 'h3';
 import 'node:async_hooks';
 
 function defineTelegramBot(config) {
   return config;
-}
-
-function buildToolSet(routes, invoke) {
-  const entries = routes.map((route) => {
-    const { definition } = route.module;
-    const base = Object.keys(definition.input).length > 0 ? definition.input : route.autoInput ?? definition.input;
-    const inputShape = route.paramsInput ? { ...route.paramsInput, ...base } : base;
-    const inputSchema = z.object(llmSafeShape(inputShape));
-    assertRepresentable(definition.name, inputSchema);
-    return [
-      definition.name,
-      tool$1({
-        description: definition.description,
-        inputSchema,
-        execute: async (input) => invoke(route, input)
-      })
-    ];
-  });
-  return Object.fromEntries(entries);
-}
-function assertRepresentable(toolName, schema) {
-  try {
-    asSchema(schema).jsonSchema;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `[nitro-bot] Tool "${toolName}" has an input schema that cannot be represented in JSON Schema: ${message}. Replace the offending field with a JSON-representable type (e.g. an ISO date string that parses to a Date via \`z.string().transform((v) => new Date(v)).pipe(z.date())\`).`
-    );
-  }
-}
-function llmSafeShape(shape) {
-  const out = {};
-  for (const [key, schema] of Object.entries(shape)) out[key] = llmSafe(schema);
-  return out;
-}
-function defType(schema) {
-  return schema._zod?.def?.type;
-}
-function defOf(schema) {
-  return schema._zod?.def ?? {};
-}
-function withDescription(schema, source) {
-  const description = source.description;
-  return description ? schema.describe(description) : schema;
-}
-function llmSafe(schema) {
-  switch (defType(schema)) {
-    case "date":
-      return withDescription(
-        z.string().transform((value) => new Date(value)).pipe(z.date()),
-        schema
-      );
-    case "optional": {
-      const inner = defOf(schema).innerType;
-      return inner ? withDescription(llmSafe(inner).nullable(), schema) : schema;
-    }
-    case "nullable": {
-      const inner = defOf(schema).innerType;
-      return inner ? withDescription(llmSafe(inner).nullable(), schema) : schema;
-    }
-    case "array": {
-      const element = defOf(schema).element;
-      return element ? withDescription(z.array(llmSafe(element)), schema) : schema;
-    }
-    case "object": {
-      const shape = defOf(schema).shape;
-      if (!shape) return schema;
-      return withDescription(z.object(llmSafeShape(shape)), schema);
-    }
-    default:
-      return schema;
-  }
-}
-function createChatHandler(options) {
-  const invoke = options.invoke ?? defaultInvoke;
-  const model = options.model ?? "anthropic/claude-sonnet-4.6";
-  const maxSteps = options.maxSteps ?? 8;
-  const system = options.systemPrompt;
-  const source = options.source ?? "json";
-  const field = options.field ?? "message";
-  const tools = buildToolSet(options.tools, invoke);
-  return defineEventHandler(async (event) => {
-    const prompt = await readPrompt(event, source, field);
-    const result = await runAgent({ prompt, tools, model, systemPrompt: system, maxSteps });
-    const response = { text: result.text, steps: result.steps };
-    return response;
-  });
-}
-async function readPrompt(event, source, field) {
-  if (source === "query") {
-    const schema2 = z.object({ [field]: z.string() });
-    const data2 = await getValidatedQuery(event, (raw) => schema2.parse(raw));
-    return data2[field];
-  }
-  if (source === "form") {
-    const form = await readFormData(event);
-    const value = form.get(field);
-    if (typeof value !== "string" || value.length === 0)
-      throw Object.assign(new Error(`Form field '${field}' is required.`), { statusCode: 400 });
-    return value;
-  }
-  const schema = z.object({ [field]: z.string() });
-  const data = await readValidatedBody(event, (raw) => schema.parse(raw));
-  return data[field];
-}
-async function defaultInvoke(route, input) {
-  const handler = route.module.default;
-  const useQuery = route.method === "GET" || route.method === "DELETE";
-  const { params, rest } = splitParams(input, route.params);
-  if (handler && typeof handler.execute === "function") {
-    const event = createSyntheticEvent(route.method, { params });
-    return await handler.execute(event, useQuery ? void 0 : rest, useQuery ? rest : void 0);
-  }
-  if (handler) {
-    const event = createSyntheticEvent(route.method, useQuery ? { params, query: rest } : { params, body: rest });
-    return await handler(event);
-  }
-  const fetcher = globalThis.$fetch;
-  if (!fetcher) {
-    throw new Error(
-      `[nitro-bot] route ${route.path} has no default handler and \`$fetch\` is unavailable. Pass a custom \`invoke\` to createChatHandler.`
-    );
-  }
-  return fetcher(substituteParams(route.path, params), {
-    method: route.method,
-    ...useQuery ? { query: rest } : { body: rest }
-  });
-}
-function splitParams(input, paramNames) {
-  if (!paramNames?.length || !input || typeof input !== "object") return { params: {}, rest: input };
-  const params = {};
-  const rest = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (paramNames.includes(key)) {
-      if (value !== void 0 && value !== null) params[key] = String(value);
-    } else rest[key] = value;
-  }
-  return { params, rest };
-}
-function substituteParams(path, params) {
-  return path.replace(/:(\w+)/g, (whole, name) => {
-    const value = params[name];
-    return value === void 0 ? whole : encodeURIComponent(value);
-  });
-}
-function encodeQuery(query) {
-  if (!query || typeof query !== "object") return "";
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === void 0 || value === null) continue;
-    params.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
-  }
-  const search = params.toString();
-  return search ? `?${search}` : "";
-}
-function createSyntheticEvent(method = "POST", payload) {
-  const noop = () => {
-  };
-  const ctx = getBotContext();
-  const baseContext = {};
-  if (payload?.params && Object.keys(payload.params).length > 0) baseContext.params = payload.params;
-  if (ctx) {
-    baseContext.bot = {
-      threadId: ctx.thread.id,
-      threadName: ctx.thread.title,
-      threadType: ctx.thread.type,
-      userId: ctx.user.id,
-      userName: ctx.user.username ?? ctx.user.firstName,
-      botName: ctx.bot.name,
-      botUsername: ctx.bot.username,
-      messageId: ctx.message.id,
-      replyToId: ctx.message.replyToId
-    };
-    Object.assign(baseContext, ctx.context);
-  }
-  const path = `/${encodeQuery(payload?.query)}`;
-  const hasBody = !!payload && "body" in payload && payload.body !== void 0;
-  const headers = hasBody ? { "content-type": "application/json" } : {};
-  const req = { headers, method, url: path, on: noop };
-  const res = {
-    on: noop,
-    once: noop,
-    end: noop,
-    setHeader: noop,
-    getHeader: () => void 0,
-    statusCode: 200,
-    headersSent: false
-  };
-  return {
-    node: { req, res },
-    context: baseContext,
-    path,
-    _path: path,
-    // readRawBody() consumes `_requestBody` first; a plain object is JSON-stringified by h3.
-    _requestBody: hasBody ? payload?.body : void 0,
-    method,
-    headers: new Headers(headers),
-    web: { request: new Request(`http://localhost${path}`) }
-  };
 }
 
 function botCommand(def) {
@@ -221,7 +21,8 @@ const DEFAULT_CONFIG = {
   field: "message",
   maxSteps: 8,
   model: "anthropic/claude-sonnet-4.6",
-  botsDir: "src/bots"
+  botsDir: "src/bots",
+  stream: false
 };
 function resolveChatConfig(config) {
   return { ...DEFAULT_CONFIG, ...config ?? {} };
@@ -373,8 +174,16 @@ function nitroBotModule(config = {}) {
     const endpoint = config.endpoint ?? "/chat";
     const source = config.source ?? "json";
     const httpMethod = source === "query" ? "GET" : "POST";
+    const sessionRel = config.sessionFile ?? "src/chat.ts";
+    const sessionAbs = resolve(rootDir, sessionRel);
+    const sessionFile = await exists(sessionAbs) ? sessionAbs : void 0;
+    if (config.sessionFile && !sessionFile)
+      console.warn(
+        `[nitro-bot] sessionFile "${config.sessionFile}" not found at ${sessionAbs} \u2014 using stateless /chat.`
+      );
+    const stream = config.stream ?? false;
     const configFile = await writeConfigFile({ buildDir, config });
-    const handlerFile = await writeHandlerFile({ buildDir, routes, configFile });
+    const handlerFile = await writeHandlerFile({ buildDir, routes, configFile, sessionFile, stream });
     const runtimeFile = await writeRuntimeFile({ buildDir, handlerFile });
     nitro.options.handlers.push({ route: endpoint, method: httpMethod.toLowerCase(), handler: handlerFile });
     nitro.options.alias ??= {};
@@ -393,7 +202,10 @@ function nitroBotModule(config = {}) {
       nitro.options.handlers.push({ route: "/**", middleware: true, handler: mwFile });
     }
     nitro.hooks.hook("compiled", () => {
-      console.log(`[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source})`);
+      const mode = sessionFile ? `session${stream ? "+stream" : ""}` : "stateless";
+      console.log(
+        `[nitro-bot] ${routes.length} tool(s) mounted at ${httpMethod} ${endpoint} (source: ${source}, ${mode})`
+      );
       for (const bot of bots) {
         console.log(
           `[nitro-bot] bot "${bot.name}": ${bot.preFiles.length} pre, ${bot.postFiles.length} post middleware, ${bot.subagentFiles.length} subagent(s)`
@@ -477,7 +289,9 @@ export default config;
 async function writeHandlerFile({
   buildDir,
   routes,
-  configFile
+  configFile,
+  sessionFile,
+  stream
 }) {
   const handlerFile = resolve(buildDir, "chat-handler.ts");
   const needsZodImport = routes.some((route) => route.params.length > 0 || route.schema);
@@ -515,10 +329,24 @@ async function writeHandlerFile({
     return `  { ${fields.join(", ")} }`;
   }).join(",\n");
   const configImport = `import userConfig from ${JSON.stringify(configFile.replace(/\.ts$/, ""))};`;
+  const handlerImport = sessionFile ? `import { buildToolSet, createSessionChatHandler, defaultInvoke, resolveChatConfig, type ToolRoute } from "@elumixor/nitro-bot";` : `import { buildToolSet, createChatHandler, defaultInvoke, resolveChatConfig, type ToolRoute } from "@elumixor/nitro-bot";`;
+  const sessionImport = sessionFile ? `import chatSession from ${JSON.stringify(sessionFile.replace(/\.tsx?$/, ""))};
+` : "";
+  const defaultExport = sessionFile ? `export default createSessionChatHandler({
+  session: chatSession,
+  tools: toolRoutes,
+  model: chatConfig.model,
+  maxSteps: chatConfig.maxSteps,
+  field: chatConfig.field,
+  stream: ${stream ? "true" : "false"},
+});` : `export default createChatHandler({
+  ...chatConfig,
+  tools: toolRoutes,
+});`;
   const source = `// Generated by @elumixor/nitro-bot \u2014 do not edit.
-import { buildToolSet, createChatHandler, defaultInvoke, resolveChatConfig, type ToolRoute } from "@elumixor/nitro-bot";
+${handlerImport}
 ${needsZodImport ? 'import { z } from "zod";\n' : ""}${configImport}
-${imports}${schemaImports ? `
+${sessionImport}${imports}${schemaImports ? `
 ${schemaImports}` : ""}
 ${inputDecls ? `
 ${inputDecls}
@@ -531,10 +359,7 @@ ${toolList}
 
 export const tools = buildToolSet(toolRoutes, defaultInvoke);
 
-export default createChatHandler({
-  ...chatConfig,
-  tools: toolRoutes,
-});
+${defaultExport}
 `;
   await writeFile(handlerFile, source, "utf8");
   return handlerFile;
@@ -646,6 +471,10 @@ export default defineEventHandler(async (event) => {
   return file;
 }
 
+function defineChatSession(def) {
+  return def;
+}
+
 const SUBAGENT_BRAND = Symbol.for("nitro-bot.subagent");
 function defineSubagent(def) {
   return {
@@ -679,4 +508,4 @@ function isToolDefinition(value) {
 const botPre = (fn) => fn;
 const botPost = (fn) => fn;
 
-export { botCommand, botPost, botPre, buildToolSet, createChatHandler, defaultInvoke, defineSubagent, defineTelegramBot, discoverToolRoutes, getBotContext, isSubagentDefinition, isToolDefinition, nitroBotModule, resolveChatConfig, runAgent, tool };
+export { botCommand, botPost, botPre, defineChatSession, defineSubagent, defineTelegramBot, discoverToolRoutes, isSubagentDefinition, isToolDefinition, nitroBotModule, resolveChatConfig, tool };

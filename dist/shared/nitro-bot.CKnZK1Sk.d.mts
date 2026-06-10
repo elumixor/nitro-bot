@@ -1,9 +1,9 @@
 import { Bot } from 'grammy';
+import { ToolSet, LanguageModel, ModelMessage } from 'ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import { z } from 'zod';
 import * as h3 from 'h3';
-import { EventHandler } from 'h3';
+import { EventHandler, H3Event } from 'h3';
 
 type TelegramWebhookConfig = {
     /** Public URL Telegram should POST updates to. Must resolve to this app's `/<botName>/webhook` route. */
@@ -56,6 +56,40 @@ type TelegramBotConfig = {
 };
 /** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */
 declare function defineTelegramBot(config: TelegramBotConfig): TelegramBotConfig;
+
+type RunAgentOptions = {
+    prompt: string;
+    tools: ToolSet;
+    model: LanguageModel;
+    systemPrompt?: string;
+    maxSteps?: number;
+};
+type RunAgentResult = {
+    text: string;
+    steps: number;
+};
+declare function runAgent(options: RunAgentOptions): Promise<RunAgentResult>;
+type StreamAgentOptions = {
+    tools: ToolSet;
+    model: LanguageModel;
+    systemPrompt?: string;
+    maxSteps?: number;
+    /** Full conversation history (including the current user turn). Takes precedence over `prompt`. */
+    messages?: ModelMessage[];
+    /** Used only when `messages` is empty — a single user prompt. */
+    prompt?: string;
+    /** Called for each text chunk as the model streams its final answer. */
+    onDelta?: (delta: string) => void;
+    /** Called when the model invokes a tool — useful for a live `🔧 <name>` trail. */
+    onToolCall?: (name: string) => void;
+};
+/**
+ * Streaming counterpart to {@link runAgent}. Drives an agent loop with `streamText`, forwarding text
+ * deltas (and optional tool-call events) through callbacks, and resolves to the final text + step count.
+ * Run it inside `botContextStorage.run(ctx, () => runAgentStream(...))` so tool routes see the live
+ * BotContext on `event.context` exactly like the Telegram transport.
+ */
+declare function runAgentStream(options: StreamAgentOptions): Promise<RunAgentResult>;
 
 declare module "h3" {
     interface H3EventContext {
@@ -221,8 +255,17 @@ type ChatConfig = {
     systemPrompt?: string;
     /** Directory scanned for bot definitions. Defaults to `src/bots`. */
     botsDir?: string;
+    /**
+     * Path (relative to the Nitro root) to a server-side chat-session file whose default export is a
+     * {@link import("./session").ChatSessionDef} (via `defineChatSession`). When set, the `/chat` endpoint
+     * is backed by that session — server-owned history, auth, and per-conversation tool context — instead
+     * of the stateless single-message handler.
+     */
+    sessionFile?: string;
+    /** Stream the `/chat` reply as Server-Sent Events (`data: {delta}` / `{done}` / `{error}`). */
+    stream?: boolean;
 };
-type ResolvedChatConfig = Required<Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir">> & Pick<ChatConfig, "systemPrompt">;
+type ResolvedChatConfig = Required<Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir" | "stream">> & Pick<ChatConfig, "systemPrompt" | "sessionFile">;
 declare function resolveChatConfig(config: ChatConfig | undefined): ResolvedChatConfig;
 
 declare const TOOL_BRAND: unique symbol;
@@ -310,6 +353,72 @@ declare function registerBot(name: string, entry: BotEntry): void;
 /** Reach a running bot from anywhere (routes, webhooks, plugins). Omit `name` to get the first one. */
 declare function getBot(name?: string): BotEntry | undefined;
 
+/**
+ * What `resolve()` returns for a single HTTP chat request: who the user is, which server-side
+ * conversation this turn belongs to, the system prompt for this turn, and any extra context that
+ * should be visible to tool routes on `event.context`.
+ */
+type ChatSessionResolved = {
+    /** Stable id of the conversation this turn belongs to. History is loaded/saved against it. */
+    conversationId: string;
+    /** System prompt for this turn (built from app state — current draft, available templates, …). */
+    systemPrompt?: string;
+    /** Identity surfaced to the agent/tools. Maps onto `BotContext.user`. */
+    user?: {
+        id: string;
+        username?: string;
+        firstName?: string;
+        lastName?: string;
+    };
+    /**
+     * Extra fields merged onto `BotContext.context`, which the generated handler copies onto
+     * `event.context`. Tool routes read them the normal Nitro way (e.g. `event.context.threadId`).
+     */
+    context?: NitroBotContext;
+};
+/**
+ * Server-side session hooks for the HTTP `/chat` endpoint. The frontend sends only `{ <field>, ... }`;
+ * the server owns auth, conversation identity, history, and persistence. Place the default export in the
+ * file referenced by `nitroBotModule({ sessionFile })` (default `src/chat.ts`).
+ */
+type ChatSessionDef = {
+    /**
+     * Authenticate the request and resolve the conversation. Receives the live h3 event (cookies, headers)
+     * and the raw request body. Throw an h3 error (e.g. `createError({ statusCode: 401 })`) to reject.
+     */
+    resolve: (event: H3Event, body: Record<string, unknown>) => Promise<ChatSessionResolved> | ChatSessionResolved;
+    /** Load prior messages for the conversation (oldest → newest). Omit for a stateless single-turn chat. */
+    loadHistory?: (resolved: ChatSessionResolved, event: H3Event) => Promise<ModelMessage[]> | ModelMessage[];
+    /** Persist the completed turn so the next request has context. Errors are logged, not surfaced. */
+    save?: (resolved: ChatSessionResolved, turn: {
+        user: string;
+        assistant: string;
+    }, event: H3Event) => Promise<void> | void;
+};
+/** Identity helper that types the default export of the session file. */
+declare function defineChatSession(def: ChatSessionDef): ChatSessionDef;
+
+type SessionChatOptions = {
+    session: ChatSessionDef;
+    tools: ToolRoute[];
+    model: LanguageModel;
+    maxSteps: number;
+    /** Body field carrying the user message (default `message`). */
+    field?: string;
+    /** Stream the reply as Server-Sent Events. When false, returns `{ text, steps }` once finished. */
+    stream?: boolean;
+};
+/**
+ * HTTP `/chat` handler backed by server-side sessions (see {@link defineChatSession}). Resolves the
+ * request to a conversation, loads its history, runs a streaming agent loop with the route tools, and
+ * persists the turn. The agent runs inside `botContextStorage` so tool routes read `event.context`
+ * (user, conversation, app-specific fields) just like the Telegram transport.
+ */
+declare function createSessionChatHandler(options: SessionChatOptions): h3.EventHandler<h3.EventHandlerRequest, Promise<ReadableStream<Uint8Array<ArrayBufferLike>> | {
+    text: string;
+    steps: number;
+}>>;
+
 declare const SUBAGENT_BRAND: unique symbol;
 /**
  * A focused agent that owns a subset of the bot's tools. The coordinator (the bot's top-level agent)
@@ -343,5 +452,5 @@ declare function defineSubagent(def: {
 }): SubagentDefinition;
 declare function isSubagentDefinition(value: unknown): value is SubagentDefinition;
 
-export { getBot as D, getBotContext as E, isBotToolDefinition as F, isSubagentDefinition as G, isToolDefinition as J, registerBot as K, resolveChatConfig as L, tool as M, botCommand as p, botContextStorage as q, botPost as r, botPre as s, botTool as t, buildBotToolSet as u, buildToolSet as v, createChatHandler as w, defaultInvoke as x, defineSubagent as y, defineTelegramBot as z };
-export type { AnyBotTool as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, SubagentDefinition as S, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, ChatOptions as f, ChatReply as g, ChatResponse as h, CommandContext as i, ResolvedChatConfig as j, TelegramBotInfo as k, TelegramWebhookConfig as l, ToolDefinition as m, ToolInput as n, ToolRoute as o };
+export { buildBotToolSet as D, buildToolSet as E, createChatHandler as F, createSessionChatHandler as G, defaultInvoke as J, defineChatSession as K, defineSubagent as L, defineTelegramBot as M, getBot as O, getBotContext as P, isBotToolDefinition as Q, isSubagentDefinition as U, isToolDefinition as V, registerBot as W, resolveChatConfig as X, runAgent as Y, runAgentStream as Z, tool as _, botCommand as v, botContextStorage as w, botPost as x, botPre as y, botTool as z };
+export type { AnyBotTool as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, BotContext as a, BotEntry as b, BotPostFn as c, BotPreFn as d, BotToolDefinition as e, ChatOptions as f, ChatReply as g, ChatResponse as h, ChatSessionDef as i, ChatSessionResolved as j, CommandContext as k, ResolvedChatConfig as l, RunAgentOptions as m, RunAgentResult as n, StreamAgentOptions as o, SubagentDefinition as p, TelegramBotInfo as q, TelegramWebhookConfig as r, ToolDefinition as s, ToolInput as t, ToolRoute as u };

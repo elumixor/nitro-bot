@@ -1,5 +1,5 @@
-import { tool as aiTool, type ToolSet } from "ai";
 import { describe, expect, test } from "bun:test";
+import { tool as aiTool, type ToolSet } from "ai";
 import { z } from "zod";
 import { defineSubagent } from "./subagent";
 import { buildCoordinatorTools } from "./supervisor";
