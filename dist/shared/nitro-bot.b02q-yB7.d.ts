@@ -144,8 +144,12 @@ type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
         text: string;
         id: number;
         replyToId?: number;
+        /** Text (or caption) of the replied-to message, if this message is a reply. */
+        replyToText?: string;
         /** Sender id of the replied-to message, if this message is a reply. */
         replyToFromId?: string;
+        /** Display name (first+last, or username) of the replied-to message's sender. */
+        replyToFromName?: string;
         /** True when this message replies directly to one of the bot's own messages. */
         repliesToBot?: boolean;
     };

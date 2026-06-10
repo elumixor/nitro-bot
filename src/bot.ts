@@ -321,15 +321,21 @@ function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | 
 
   // In a forum supergroup every topic message carries `message_thread_id`; the "General" topic does not.
   const topicId = msg.is_topic_message ? msg.message_thread_id : undefined;
-  const replyFrom = msg.reply_to_message?.from;
+  const replyTo = msg.reply_to_message;
+  const replyFrom = replyTo?.from;
+  const replyToFromName = replyFrom
+    ? [replyFrom.first_name, replyFrom.last_name].filter(Boolean).join(" ") || replyFrom.username
+    : undefined;
 
   return {
     bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
     message: {
       text: msg.text,
       id: msg.message_id,
-      replyToId: msg.reply_to_message?.message_id,
+      replyToId: replyTo?.message_id,
+      replyToText: replyTo?.text ?? replyTo?.caption,
       replyToFromId: replyFrom ? String(replyFrom.id) : undefined,
+      replyToFromName,
       repliesToBot: replyFrom ? replyFrom.id === ctx.me?.id : undefined,
     },
     user: {

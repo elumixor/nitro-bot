@@ -402,14 +402,18 @@ function buildBotContext(ctx, config) {
     }
   };
   const topicId = msg.is_topic_message ? msg.message_thread_id : void 0;
-  const replyFrom = msg.reply_to_message?.from;
+  const replyTo = msg.reply_to_message;
+  const replyFrom = replyTo?.from;
+  const replyToFromName = replyFrom ? [replyFrom.first_name, replyFrom.last_name].filter(Boolean).join(" ") || replyFrom.username : void 0;
   return {
     bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
     message: {
       text: msg.text,
       id: msg.message_id,
-      replyToId: msg.reply_to_message?.message_id,
+      replyToId: replyTo?.message_id,
+      replyToText: replyTo?.text ?? replyTo?.caption,
       replyToFromId: replyFrom ? String(replyFrom.id) : void 0,
+      replyToFromName,
       repliesToBot: replyFrom ? replyFrom.id === ctx.me?.id : void 0
     },
     user: {
