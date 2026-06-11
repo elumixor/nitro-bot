@@ -37,6 +37,7 @@ export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-m
 export { type BotEntry, getBot, registerBot } from "./registry";
 export { type ChatSessionDef, type ChatSessionResolved, defineChatSession } from "./session";
 export { createSessionChatHandler, type SessionChatOptions } from "./session-handler";
+export { type RunAgentSessionOptions, runAgentSession } from "./session-stream";
 export { defineSubagent, isSubagentDefinition, type SubagentDefinition } from "./subagent";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
 export {

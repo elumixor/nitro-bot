@@ -126,6 +126,63 @@ How it routes:
 
 Declare no subagents and nothing changes — the coordinator keeps the full flat tool set (fully backward compatible).
 
+## Server-side sessions (history, auth, per-conversation context)
+
+By default `/chat` is stateless: each request is one message, no history. For a real chat you want
+server-owned history, auth, and a per-conversation system prompt. Define a session:
+
+```ts
+// src/chat.ts
+import { defineChatSession } from "@elumixor/nitro-bot";
+
+export default defineChatSession({
+  // Authenticate + resolve which conversation this turn belongs to. Reads cookies/headers off `event`.
+  resolve: async (event) => {
+    const user = await requireUser(event);
+    const threadId = getHeader(event, "x-thread-id") ?? "";
+    return { conversationId: threadId, systemPrompt: await buildSystemPrompt(threadId), user, context: { threadId } };
+  },
+  loadHistory: (resolved) => loadMessages(resolved.conversationId), // omit for stateless
+  save: (resolved, turn) => persistTurn(resolved.conversationId, turn),
+});
+```
+
+Point the module at it and you get a session-backed `/chat` (SSE when `stream: true`):
+
+```ts
+nitroBotModule({ sessionFile: "src/chat.ts", stream: true });
+```
+
+### Typed streaming client (keep `api.chat.$post`)
+
+The mounted SSE endpoint isn't visible to `@elumixor/nitro-client`'s generator, so it can't produce a
+typed client. To keep an end-to-end-typed `for await (const ev of api.chat.$post(...))`, own a thin route
+under `routes/` and `yield*` **`runAgentSession`** — the session logic stays in the library, the route is
+just a statically-typed shim:
+
+```ts
+// src/api/routes/chat.post.ts
+import { runAgentSession } from "@elumixor/nitro-bot";
+import { handler } from "@elumixor/nitro-client/server";
+import { z } from "zod";
+import session from "../../chat";
+import { chatConfig, toolRoutes } from "#nitro-bot";
+
+export default handler({ body: { message: z.string().min(1) } }, async function* ({ event, body }) {
+  return yield* runAgentSession({
+    session,
+    event,
+    message: body.message,
+    toolRoutes,
+    model: chatConfig.model,
+    maxSteps: chatConfig.maxSteps,
+  });
+});
+```
+
+Pair it with `nitroBotModule({ endpoint: false })` (you serve `/chat` yourself). The generator `yield`s
+`{ type: "delta" | "tool" }` and `return`s `{ steps }`, so the client `Stream` is fully typed.
+
 ## Configuration
 
 `nitroBotModule({...})` accepts:
