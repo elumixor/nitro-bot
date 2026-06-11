@@ -271,7 +271,12 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
             }
             seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
           }
-          void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
+          // On serverless the instance freezes once we respond, so a backgrounded agent turn is killed
+          // mid-reply. `awaitProcessing` blocks the 200 until the turn (and its streamed reply) finishes.
+          const processing = bot
+            .handleUpdate(update)
+            .catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
+          if (webhook.awaitProcessing) await processing;
           return new Response(null, { status: 200 });
         };
         registerBot(registryName, { bot, handleUpdate });
