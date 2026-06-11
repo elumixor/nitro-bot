@@ -45,7 +45,8 @@ describe("runAgentSession", () => {
     const session: ChatSessionDef = {
       resolve: (_event, body) => {
         calls.push("resolve");
-        expect(body).toEqual({ message: "hello" });
+        // The full body is forwarded verbatim — the app reads its own fields (e.g. threadId) off it.
+        expect(body).toEqual({ message: "hello", threadId: "t1" });
         return { conversationId: "t1", systemPrompt: "be brief", user: { id: "u1" }, context: { threadId: "t1" } };
       },
       loadHistory: () => {
@@ -63,6 +64,7 @@ describe("runAgentSession", () => {
       session,
       event: fakeEvent,
       message: "hello",
+      body: { message: "hello", threadId: "t1" },
       toolRoutes: [],
       model: streamingModel("hi there"),
     });

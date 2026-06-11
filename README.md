@@ -168,20 +168,26 @@ import { z } from "zod";
 import session from "../../chat";
 import { chatConfig, toolRoutes } from "#nitro-bot";
 
-export default handler({ body: { message: z.string().min(1) } }, async function* ({ event, body }) {
-  return yield* runAgentSession({
-    session,
-    event,
-    message: body.message,
-    toolRoutes,
-    model: chatConfig.model,
-    maxSteps: chatConfig.maxSteps,
-  });
-});
+export default handler(
+  { body: { message: z.string().min(1), threadId: z.string() } },
+  async function* ({ event, body }) {
+    return yield* runAgentSession({
+      session,
+      event,
+      message: body.message,
+      body, // forwarded to session.resolve so it can read body.threadId
+      toolRoutes,
+      model: chatConfig.model,
+      maxSteps: chatConfig.maxSteps,
+    });
+  },
+);
 ```
 
 Pair it with `nitroBotModule({ endpoint: false })` (you serve `/chat` yourself). The generator `yield`s
-`{ type: "delta" | "tool" }` and `return`s `{ steps }`, so the client `Stream` is fully typed.
+`{ type: "delta" | "tool" }` and `return`s `{ steps }`, so the client `Stream` is fully typed. The whole
+request body is forwarded to `session.resolve` — carry the conversation id there (the generated streaming
+client can't attach per-call headers, so the body is the typed way to pass it).
 
 ## Configuration
 

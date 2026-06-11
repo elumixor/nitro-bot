@@ -11,6 +11,11 @@ export type RunAgentSessionOptions = {
   event: H3Event;
   /** The user's message for this turn. */
   message: string;
+  /**
+   * The full parsed request body, forwarded verbatim to `session.resolve` (so it can read app-specific
+   * fields like a thread/conversation id the client sent alongside the message). Defaults to `{ message }`.
+   */
+  body?: Record<string, unknown>;
   /** Discovered tool routes (from `#nitro-bot`). */
   toolRoutes: ToolRoute[];
   model: LanguageModel;
@@ -31,7 +36,7 @@ export type RunAgentSessionOptions = {
 export async function* runAgentSession(opts: RunAgentSessionOptions): AsyncGenerator<AgentEvent, { steps: number }> {
   const { session, event, message, toolRoutes, model, maxSteps } = opts;
 
-  const resolved = await session.resolve(event, { message });
+  const resolved = await session.resolve(event, opts.body ?? { message });
   const history = (await session.loadHistory?.(resolved, event)) ?? [];
 
   const messages: ModelMessage[] = [...history];
