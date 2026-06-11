@@ -4,6 +4,30 @@ import { useEffect, useState } from "react";
 import type { OutputGuard } from "./adapters/telegram";
 import { getBotContext } from "./als";
 
+/**
+ * Pull a human-readable message out of whatever the model/provider throws. AI SDK stream `error` parts
+ * (and gateway/provider errors) are plain objects like `{ error: { message } }` or `{ message }`, not
+ * `Error`s — `String(obj)` on those yields the useless "[object Object]" the user otherwise sees.
+ */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const o = error as Record<string, unknown>;
+    if (typeof o.message === "string") return o.message;
+    const nested = o.error;
+    if (nested && typeof nested === "object" && typeof (nested as Record<string, unknown>).message === "string")
+      return (nested as Record<string, unknown>).message as string;
+    if (typeof nested === "string") return nested;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
+}
+
 export type AgentReplyProps = {
   messages: ModelMessage[];
   /** System prompt (preferred over `role: "system"` messages). Set via `ctx.agent.systemPrompt`. */
@@ -165,7 +189,7 @@ export function AgentReply({
               render();
               break;
             case "error":
-              throw new Error(String((part as { error?: unknown }).error ?? "stream error"));
+              throw new Error(errorMessage((part as { error?: unknown }).error) || "stream error");
             default:
               break;
           }
