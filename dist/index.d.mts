@@ -1,10 +1,10 @@
-import { g as BotToolDefinition, H as HttpMethod, C as ChatConfig } from './shared/nitro-bot.b02q-yB7.mjs';
-export { A as AgentEvent, a as AgentEventStreamOptions, b as AnyBotTool, B as BotCommandDef, c as BotContext, d as BotEntry, e as BotPostFn, f as BotPreFn, h as ChatOptions, i as ChatReply, j as ChatResponse, k as ChatSessionDef, l as ChatSessionResolved, m as CommandContext, I as InvokeFn, N as NitroBotContext, R as RequestSource, n as ResolvedChatConfig, o as RunAgentOptions, p as RunAgentResult, S as SessionChatOptions, q as StreamAgentOptions, r as SubagentDefinition, T as TelegramBotConfig, s as TelegramBotInfo, t as TelegramWebhookConfig, u as ToolDefinition, v as ToolInput, w as ToolRoute, x as botCommand, z as botPost, D as botPre, E as botTool, F as buildBotToolSet, G as buildToolSet, J as createChatHandler, K as createSessionChatHandler, L as defaultInvoke, M as defineChatSession, O as defineSubagent, P as defineTelegramBot, Q as getBot, U as getBotContext, V as isBotToolDefinition, W as isSubagentDefinition, X as isToolDefinition, Y as registerBot, Z as resolveChatConfig, _ as runAgent, $ as runAgentEventStream, a0 as runAgentStream, a1 as tool } from './shared/nitro-bot.b02q-yB7.mjs';
+import { g as BotToolDefinition, H as HttpMethod, C as ChatConfig, k as ChatSessionDef, x as ToolRoute, A as AgentEvent } from './shared/nitro-bot.Bf--YHj6.mjs';
+export { a as AgentEventStreamOptions, b as AnyBotTool, B as BotCommandDef, c as BotContext, d as BotEntry, e as BotPostFn, f as BotPreFn, h as ChatOptions, i as ChatReply, j as ChatResponse, l as ChatSessionResolved, m as CommandContext, I as InvokeFn, N as NitroBotContext, O as OutputGuard, n as OutputGuardInput, R as RequestSource, o as ResolvedChatConfig, p as RunAgentOptions, q as RunAgentResult, S as SessionChatOptions, r as StreamAgentOptions, s as SubagentDefinition, T as TelegramBotConfig, t as TelegramBotInfo, u as TelegramWebhookConfig, v as ToolDefinition, w as ToolInput, y as botCommand, D as botPost, E as botPre, F as botTool, G as buildBotToolSet, J as buildToolSet, K as createChatHandler, L as createSessionChatHandler, M as defaultInvoke, P as defineChatSession, Q as defineSubagent, U as defineTelegramBot, V as getBot, W as getBotContext, X as isBotToolDefinition, Y as isSubagentDefinition, Z as isToolDefinition, _ as registerBot, $ as resolveChatConfig, a0 as runAgent, a1 as runAgentEventStream, a2 as runAgentStream, a3 as tool } from './shared/nitro-bot.Bf--YHj6.mjs';
 import { z } from 'zod';
+import { LanguageModel } from 'ai';
+import { H3Event } from 'h3';
 import 'grammy';
-import 'ai';
 import 'node:async_hooks';
-import 'h3';
 
 /**
  * Built-in tool auto-registered for Telegram bots (opt out via `builtins: { sendFile: false }`).
@@ -67,5 +67,37 @@ type NitroLike = {
 type NitroBotModuleOptions = ChatConfig;
 declare function nitroBotModule(config?: NitroBotModuleOptions): (nitro: NitroLike) => Promise<void>;
 
-export { BotToolDefinition, ChatConfig, HttpMethod, discoverToolRoutes, nitroBotModule, sendFileBuiltin };
-export type { DiscoveredRoute, NitroBotModuleOptions };
+type RunAgentSessionOptions = {
+    /** Server-side session hooks: resolve (auth + conversation), loadHistory, save. */
+    session: ChatSessionDef;
+    /** Live h3 event — passed to the session hooks so they can read cookies/headers. */
+    event: H3Event;
+    /** The user's message for this turn. */
+    message: string;
+    /**
+     * The full parsed request body, forwarded verbatim to `session.resolve` (so it can read app-specific
+     * fields like a thread/conversation id the client sent alongside the message). Defaults to `{ message }`.
+     */
+    body?: Record<string, unknown>;
+    /** Discovered tool routes (from `#nitro-bot`). */
+    toolRoutes: ToolRoute[];
+    model: LanguageModel;
+    maxSteps?: number;
+};
+/**
+ * Generator-shaped, server-side-session chat turn. The streaming twin of
+ * {@link import("./session-handler").createSessionChatHandler}: instead of mounting an SSE endpoint, it
+ * `yield`s {@link AgentEvent}s and `return`s `{ steps }`, so a consumer can `yield*` it straight out of a
+ * `@elumixor/nitro-client` `handler(async function* …)` route and get a fully typed client `Stream` —
+ * keeping the chat logic in the library while the consumer owns only a thin, statically-typed shim.
+ *
+ * It resolves the request to a conversation, loads its history, runs the agent loop with the route tools
+ * (inside `botContextStorage`, via `runAgentEventStream`, so tool routes read `event.context`), then
+ * persists the turn.
+ */
+declare function runAgentSession(opts: RunAgentSessionOptions): AsyncGenerator<AgentEvent, {
+    steps: number;
+}>;
+
+export { AgentEvent, BotToolDefinition, ChatConfig, ChatSessionDef, HttpMethod, ToolRoute, discoverToolRoutes, nitroBotModule, runAgentSession, sendFileBuiltin };
+export type { DiscoveredRoute, NitroBotModuleOptions, RunAgentSessionOptions };

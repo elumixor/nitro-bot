@@ -1,5 +1,7 @@
 export {
   defineTelegramBot,
+  type OutputGuard,
+  type OutputGuardInput,
   type TelegramBotConfig,
   type TelegramBotInfo,
   type TelegramWebhookConfig,

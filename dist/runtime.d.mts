@@ -1,5 +1,5 @@
-import { T as TelegramBotConfig, f as BotPreFn, e as BotPostFn, b as AnyBotTool, w as ToolRoute, B as BotCommandDef, r as SubagentDefinition } from './shared/nitro-bot.b02q-yB7.mjs';
-export { A as AgentEvent, a as AgentEventStreamOptions, d as BotEntry, p as RunAgentResult, S as SessionChatOptions, q as StreamAgentOptions, y as botContextStorage, K as createSessionChatHandler, Q as getBot, U as getBotContext, Y as registerBot, $ as runAgentEventStream, a0 as runAgentStream } from './shared/nitro-bot.b02q-yB7.mjs';
+import { O as OutputGuard, T as TelegramBotConfig, f as BotPreFn, e as BotPostFn, b as AnyBotTool, x as ToolRoute, B as BotCommandDef, s as SubagentDefinition } from './shared/nitro-bot.Bf--YHj6.mjs';
+export { A as AgentEvent, a as AgentEventStreamOptions, d as BotEntry, q as RunAgentResult, S as SessionChatOptions, r as StreamAgentOptions, z as botContextStorage, L as createSessionChatHandler, V as getBot, W as getBotContext, _ as registerBot, a1 as runAgentEventStream, a2 as runAgentStream } from './shared/nitro-bot.Bf--YHj6.mjs';
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import 'grammy';
@@ -21,8 +21,10 @@ type AgentReplyProps = {
         text: string;
         steps: number;
     }) => void | Promise<void>;
+    /** Streaming output guard. When active for this chat, completed chunks are scrubbed before being sent. */
+    guard?: OutputGuard;
 };
-declare function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish }: AgentReplyProps): react_jsx_runtime.JSX.Element;
+declare function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish, guard, }: AgentReplyProps): react_jsx_runtime.JSX.Element;
 
 type NitroApp = {
     hooks: {

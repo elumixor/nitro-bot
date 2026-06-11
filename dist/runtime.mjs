@@ -13,6 +13,15 @@ import 'h3';
 import 'node:async_hooks';
 
 const MAX_REASONING_PREVIEW = 300;
+function lastFlushBoundary(text) {
+  let boundary = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\n") boundary = i + 1;
+    else if ((c === "." || c === "!" || c === "?") && (text[i + 1] === " " || text[i + 1] === "\n")) boundary = i + 1;
+  }
+  return boundary;
+}
 function compose(reasoning, toolLines, answer) {
   const sections = [];
   if (reasoning && !answer) {
@@ -23,7 +32,16 @@ function compose(reasoning, toolLines, answer) {
   if (answer) sections.push(answer);
   return sections.join("\n\n") || "\u2026";
 }
-function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish }) {
+function AgentReply({
+  messages,
+  system,
+  tools,
+  hiddenTools,
+  model,
+  maxSteps,
+  onFinish,
+  guard
+}) {
   const [body, setBody] = useState("\u2026");
   const [errored, setErrored] = useState(null);
   const finish = useFinishRender();
@@ -32,13 +50,47 @@ function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onF
     const hidden = new Set(hiddenTools ?? []);
     void (async () => {
       let reasoning = "";
-      let answer = "";
       const toolLines = [];
       let steps = 0;
-      const render = () => {
-        if (!cancelled) setBody(compose(reasoning, toolLines, answer));
-      };
       const ctx = getBotContext();
+      const gating = Boolean(guard && ctx && guard.active(ctx));
+      let answer = "";
+      let released = "";
+      let pending = "";
+      const render = () => {
+        if (cancelled) return;
+        setBody(compose(gating ? "" : reasoning, toolLines, gating ? released : answer));
+      };
+      const flush = async (final) => {
+        if (!guard || !ctx) return;
+        for (; ; ) {
+          let end = lastFlushBoundary(pending);
+          if (end < 0) {
+            if (final && pending.length > 0) end = pending.length;
+            else break;
+          }
+          const chunk = pending.slice(0, end);
+          pending = pending.slice(end);
+          if (!chunk.trim()) {
+            released += chunk;
+            continue;
+          }
+          let safe = chunk;
+          try {
+            safe = await guard.check({ chunk, precedingText: released, ctx });
+          } catch (err) {
+            console.error("[nitro-bot] output guard error (passing chunk through):", err);
+          }
+          if (cancelled) return;
+          released += safe;
+          render();
+        }
+      };
+      let flushChain = Promise.resolve();
+      const scheduleFlush = (final) => {
+        flushChain = flushChain.then(() => flush(final));
+        return flushChain;
+      };
       if (ctx)
         ctx.agent.reportToolLine = (line) => {
           toolLines.push(line);
@@ -56,13 +108,20 @@ function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onF
           if (cancelled) return;
           const part = raw;
           switch (part.type) {
-            case "text-delta":
-              answer += part.text ?? part.delta ?? "";
-              render();
+            case "text-delta": {
+              const delta = part.text ?? part.delta ?? "";
+              if (gating) {
+                pending += delta;
+                void scheduleFlush(false);
+              } else {
+                answer += delta;
+                render();
+              }
               break;
+            }
             case "reasoning-delta":
               reasoning += part.text ?? part.delta ?? "";
-              render();
+              if (!gating) render();
               break;
             case "tool-call":
               if (part.toolName && !hidden.has(part.toolName)) toolLines.push(`\u{1F527} \`${part.toolName}\``);
@@ -74,6 +133,7 @@ function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onF
               break;
           }
         }
+        if (gating) await scheduleFlush(true);
         steps = (await result.steps).length;
       } catch (err) {
         if (!cancelled) setErrored(err instanceof Error ? err.message : String(err));
@@ -81,7 +141,7 @@ function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onF
         if (!cancelled) {
           if (onFinish) {
             try {
-              await onFinish({ text: answer, steps });
+              await onFinish({ text: gating ? released : answer, steps });
             } catch (err) {
               console.error("[nitro-bot] onFinish error:", err);
             }
@@ -93,7 +153,7 @@ function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onF
     return () => {
       cancelled = true;
     };
-  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish]);
+  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish, guard]);
   if (errored) return /* @__PURE__ */ jsxs(Message, { children: [
     "\u26A0\uFE0F ",
     errored
@@ -284,6 +344,7 @@ ${guide}` : guide;
               hiddenTools,
               model: chatConfig.model,
               maxSteps: chatConfig.maxSteps,
+              guard: botConfig.guard,
               onFinish: async (result) => {
                 botCtx.agent.result = result;
                 for (const fn of post) {

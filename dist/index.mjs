@@ -1,4 +1,5 @@
-export { a as botTool, c as buildBotToolSet, d as buildToolSet, e as createChatHandler, f as createSessionChatHandler, g as defaultInvoke, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, m as runAgentEventStream, n as runAgentStream, s as sendFileBuiltin } from './shared/nitro-bot.BLiAuwxU.mjs';
+import { m as runAgentEventStream, d as buildToolSet, g as defaultInvoke } from './shared/nitro-bot.BLiAuwxU.mjs';
+export { a as botTool, c as buildBotToolSet, e as createChatHandler, f as createSessionChatHandler, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, n as runAgentStream, s as sendFileBuiltin } from './shared/nitro-bot.BLiAuwxU.mjs';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
 import { Project, Node, SyntaxKind } from 'ts-morph';
@@ -481,6 +482,33 @@ function defineChatSession(def) {
   return def;
 }
 
+async function* runAgentSession(opts) {
+  const { session, event, message, toolRoutes, model, maxSteps } = opts;
+  const resolved = await session.resolve(event, opts.body ?? { message });
+  const history = await session.loadHistory?.(resolved, event) ?? [];
+  const messages = [...history];
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || last.content !== message) messages.push({ role: "user", content: message });
+  const result = yield* runAgentEventStream({
+    messages,
+    tools: buildToolSet(toolRoutes, defaultInvoke),
+    model,
+    maxSteps,
+    systemPrompt: resolved.systemPrompt,
+    conversationId: resolved.conversationId,
+    user: resolved.user,
+    context: resolved.context
+  });
+  if (session.save) {
+    try {
+      await session.save(resolved, { user: message, assistant: result.text }, event);
+    } catch (error) {
+      console.error("[nitro-bot] chat session save failed:", error);
+    }
+  }
+  return { steps: result.steps };
+}
+
 const SUBAGENT_BRAND = Symbol.for("nitro-bot.subagent");
 function defineSubagent(def) {
   return {
@@ -514,4 +542,4 @@ function isToolDefinition(value) {
 const botPre = (fn) => fn;
 const botPost = (fn) => fn;
 
-export { botCommand, botPost, botPre, defineChatSession, defineSubagent, defineTelegramBot, discoverToolRoutes, isSubagentDefinition, isToolDefinition, nitroBotModule, resolveChatConfig, tool };
+export { botCommand, botPost, botPre, buildToolSet, defaultInvoke, defineChatSession, defineSubagent, defineTelegramBot, discoverToolRoutes, isSubagentDefinition, isToolDefinition, nitroBotModule, resolveChatConfig, runAgentEventStream, runAgentSession, tool };

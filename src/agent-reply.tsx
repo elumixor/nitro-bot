@@ -1,6 +1,7 @@
 import { Message, useFinishRender } from "@elumixor/react-message-renderer";
 import { type LanguageModel, type ModelMessage, stepCountIs, streamText, type ToolSet } from "ai";
 import { useEffect, useState } from "react";
+import type { OutputGuard } from "./adapters/telegram";
 import { getBotContext } from "./als";
 
 export type AgentReplyProps = {
@@ -14,9 +15,27 @@ export type AgentReplyProps = {
   maxSteps?: number;
   /** Called when the stream finishes — passes the final text + step count back so callers can run post-middleware. */
   onFinish?: (result: { text: string; steps: number }) => void | Promise<void>;
+  /** Streaming output guard. When active for this chat, completed chunks are scrubbed before being sent. */
+  guard?: OutputGuard;
 };
 
 const MAX_REASONING_PREVIEW = 300;
+
+/**
+ * Index just past the last "safe to send" boundary in `text` (end of a sentence or a line), or -1 if none.
+ * A sentence terminator only counts when followed by whitespace, so a number like `0.5` mid-stream isn't
+ * cut at the dot. Used to release the largest already-complete prefix to the guard at once — under fast
+ * streaming the whole reply often arrives before the first guard call returns, so it's checked in one go.
+ */
+function lastFlushBoundary(text: string): number {
+  let boundary = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\n") boundary = i + 1;
+    else if ((c === "." || c === "!" || c === "?") && (text[i + 1] === " " || text[i + 1] === "\n")) boundary = i + 1;
+  }
+  return boundary;
+}
 
 /** Builds the live message body: reasoning (while thinking) + tool-call trail + the streamed answer. */
 function compose(reasoning: string, toolLines: string[], answer: string): string {
@@ -31,7 +50,16 @@ function compose(reasoning: string, toolLines: string[], answer: string): string
   return sections.join("\n\n") || "…";
 }
 
-export function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish }: AgentReplyProps) {
+export function AgentReply({
+  messages,
+  system,
+  tools,
+  hiddenTools,
+  model,
+  maxSteps,
+  onFinish,
+  guard,
+}: AgentReplyProps) {
   const [body, setBody] = useState("…");
   const [errored, setErrored] = useState<string | null>(null);
   const finish = useFinishRender();
@@ -41,17 +69,61 @@ export function AgentReply({ messages, system, tools, hiddenTools, model, maxSte
     const hidden = new Set(hiddenTools ?? []);
     void (async () => {
       let reasoning = "";
-      let answer = "";
       const toolLines: string[] = [];
       let steps = 0;
 
+      const ctx = getBotContext();
+      // When a guard is active for this chat we never render the raw stream: only text the guard has
+      // cleared (`released`) reaches the UI, so sensitive content is scrubbed before it's ever sent —
+      // no send-then-edit. `pending` holds streamed-but-unchecked text; `answer` is the ungated path.
+      const gating = Boolean(guard && ctx && guard.active(ctx));
+      let answer = "";
+      let released = "";
+      let pending = "";
+
       const render = () => {
-        if (!cancelled) setBody(compose(reasoning, toolLines, answer));
+        if (cancelled) return;
+        // Suppress reasoning while gating — it's unchecked text and could itself leak.
+        setBody(compose(gating ? "" : reasoning, toolLines, gating ? released : answer));
+      };
+
+      // Pull every already-complete chunk out of `pending`, scrub it, and release it. On `final` the
+      // trailing remainder (no terminator yet) is flushed too. Calls are serialized via `flushChain`
+      // so chunks are released in order even though the guard is async.
+      const flush = async (final: boolean) => {
+        if (!guard || !ctx) return;
+        for (;;) {
+          let end = lastFlushBoundary(pending);
+          if (end < 0) {
+            if (final && pending.length > 0) end = pending.length;
+            else break;
+          }
+          const chunk = pending.slice(0, end);
+          pending = pending.slice(end);
+          if (!chunk.trim()) {
+            released += chunk; // whitespace-only — nothing to scrub, keep spacing
+            continue;
+          }
+          let safe = chunk;
+          try {
+            safe = await guard.check({ chunk, precedingText: released, ctx });
+          } catch (err) {
+            // Backstop, not the only defense — never brick the reply on a guard outage; log and pass through.
+            console.error("[nitro-bot] output guard error (passing chunk through):", err);
+          }
+          if (cancelled) return;
+          released += safe;
+          render();
+        }
+      };
+      let flushChain = Promise.resolve();
+      const scheduleFlush = (final: boolean) => {
+        flushChain = flushChain.then(() => flush(final));
+        return flushChain;
       };
 
       // Subagent (handoff) tool calls happen inside a delegate tool's execute, off the coordinator's stream.
       // The supervisor reports them here so they still appear in the live `🔧` trail, nested under the delegate.
-      const ctx = getBotContext();
       if (ctx)
         ctx.agent.reportToolLine = (line: string) => {
           toolLines.push(line);
@@ -73,13 +145,20 @@ export function AgentReply({ messages, system, tools, hiddenTools, model, maxSte
           if (cancelled) return;
           const part = raw as { type: string; text?: string; delta?: string; toolName?: string };
           switch (part.type) {
-            case "text-delta":
-              answer += part.text ?? part.delta ?? "";
-              render();
+            case "text-delta": {
+              const delta = part.text ?? part.delta ?? "";
+              if (gating) {
+                pending += delta;
+                void scheduleFlush(false);
+              } else {
+                answer += delta;
+                render();
+              }
               break;
+            }
             case "reasoning-delta":
               reasoning += part.text ?? part.delta ?? "";
-              render();
+              if (!gating) render();
               break;
             case "tool-call":
               if (part.toolName && !hidden.has(part.toolName)) toolLines.push(`🔧 \`${part.toolName}\``);
@@ -91,6 +170,7 @@ export function AgentReply({ messages, system, tools, hiddenTools, model, maxSte
               break;
           }
         }
+        if (gating) await scheduleFlush(true); // drain the buffer before we report the final text
         steps = (await result.steps).length;
       } catch (err) {
         if (!cancelled) setErrored(err instanceof Error ? err.message : String(err));
@@ -98,7 +178,8 @@ export function AgentReply({ messages, system, tools, hiddenTools, model, maxSte
         if (!cancelled) {
           if (onFinish) {
             try {
-              await onFinish({ text: answer, steps });
+              // Report the cleared text when gating so history/logs never store the raw (unscrubbed) reply.
+              await onFinish({ text: gating ? released : answer, steps });
             } catch (err) {
               console.error("[nitro-bot] onFinish error:", err);
             }
@@ -110,7 +191,7 @@ export function AgentReply({ messages, system, tools, hiddenTools, model, maxSte
     return () => {
       cancelled = true;
     };
-  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish]);
+  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish, guard]);
 
   if (errored) return <Message>⚠️ {errored}</Message>;
   return <Message>{body}</Message>;

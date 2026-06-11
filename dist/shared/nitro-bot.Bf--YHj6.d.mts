@@ -1,95 +1,9 @@
 import { Bot } from 'grammy';
-import { ToolSet, LanguageModel, ModelMessage } from 'ai';
+import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
 import * as h3 from 'h3';
 import { EventHandler, H3Event } from 'h3';
-
-type TelegramWebhookConfig = {
-    /** Public URL Telegram should POST updates to. Must resolve to this app's `/<botName>/webhook` route. */
-    url: string;
-    /** Optional secret token; validated by grammy's webhook callback. */
-    secret?: string;
-};
-type TelegramBotInfo = {
-    id: number;
-    username?: string;
-    name: string;
-};
-type TelegramBotConfig = {
-    /**
-     * Bot token — nitro-bot constructs the grammy `Bot` for you. Prefer this: it avoids the
-     * dual-package type clash you hit when a linked/duplicate `grammy` builds the instance.
-     * Provide either `token` or `bot`.
-     */
-    token?: string;
-    /** Live grammy Bot instance, if you need full control (custom middleware, transformers, …). */
-    bot?: Bot;
-    /** Displayed as `ctx.bot.name`. Falls back to grammy's `botInfo.first_name` after start. */
-    name?: string;
-    /**
-     * Use Telegram's `sendMessageDraft` streaming when eligible (text-only, private chat).
-     * Defaults to `true`. Falls back to edit-loop for ineligible cases.
-     */
-    draftStreaming?: boolean;
-    /**
-     * Run the bot in webhook mode instead of long-polling. nitro-bot mounts the receiving route at
-     * `/<botName>/webhook` (e.g. `/telegram/webhook`); point `url` at that path on your public host.
-     */
-    webhook?: TelegramWebhookConfig;
-    /**
-     * Called once after the bot is initialized (botInfo available) but before it starts handling
-     * updates. Use for app bootstrap: DB migrations, warming caches, syncing remote config, etc.
-     */
-    onStart?: (ctx: {
-        bot: Bot;
-        info: TelegramBotInfo;
-    }) => void | Promise<void>;
-    /**
-     * Built-in tools auto-provided to this bot (both default on). `sendFile` lets the model deliver files;
-     * `react` lets it acknowledge a message with an emoji reaction.
-     */
-    builtins?: {
-        sendFile?: boolean;
-        react?: boolean;
-    };
-};
-/** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */
-declare function defineTelegramBot(config: TelegramBotConfig): TelegramBotConfig;
-
-type RunAgentOptions = {
-    prompt: string;
-    tools: ToolSet;
-    model: LanguageModel;
-    systemPrompt?: string;
-    maxSteps?: number;
-};
-type RunAgentResult = {
-    text: string;
-    steps: number;
-};
-declare function runAgent(options: RunAgentOptions): Promise<RunAgentResult>;
-type StreamAgentOptions = {
-    tools: ToolSet;
-    model: LanguageModel;
-    systemPrompt?: string;
-    maxSteps?: number;
-    /** Full conversation history (including the current user turn). Takes precedence over `prompt`. */
-    messages?: ModelMessage[];
-    /** Used only when `messages` is empty — a single user prompt. */
-    prompt?: string;
-    /** Called for each text chunk as the model streams its final answer. */
-    onDelta?: (delta: string) => void;
-    /** Called when the model invokes a tool — useful for a live `🔧 <name>` trail. */
-    onToolCall?: (name: string) => void;
-};
-/**
- * Streaming counterpart to {@link runAgent}. Drives an agent loop with `streamText`, forwarding text
- * deltas (and optional tool-call events) through callbacks, and resolves to the final text + step count.
- * Run it inside `botContextStorage.run(ctx, () => runAgentStream(...))` so tool routes see the live
- * BotContext on `event.context` exactly like the Telegram transport.
- */
-declare function runAgentStream(options: StreamAgentOptions): Promise<RunAgentResult>;
 
 declare module "h3" {
     interface H3EventContext {
@@ -197,6 +111,120 @@ type BotPostFn<C extends Record<string, unknown> = NitroBotContext> = (ctx: BotC
 declare const botPre: <C extends Record<string, unknown> = NitroBotContext>(fn: BotPreFn<C>) => BotPreFn<C>;
 /** Identity helper that types a post-middleware function. Errors are swallowed and logged. */
 declare const botPost: <C extends Record<string, unknown> = NitroBotContext>(fn: BotPostFn<C>) => BotPostFn<C>;
+
+/** Input handed to an `OutputGuard.check` for one not-yet-sent slice of the assistant's reply. */
+type OutputGuardInput = {
+    /** A completed slice of the reply (whole sentences/lines) that has NOT been sent to the chat yet. */
+    chunk: string;
+    /** Text already cleared and sent before this chunk — pass as context so cross-chunk leaks are caught. */
+    precedingText: string;
+    /** Live bot context (chat type, user, thread, …). */
+    ctx: BotContext;
+};
+/**
+ * Streaming output guard. When `active(ctx)` is true for a reply, nitro-bot buffers the streamed answer
+ * and runs each completed chunk through `check` BEFORE it is sent to the chat — so sensitive content is
+ * redacted *before* the user ever sees it (no send-then-edit). When `active` is false the reply streams
+ * normally (draft streaming intact). Inactive replies never call `check`.
+ */
+type OutputGuard = {
+    /** Cheap, synchronous decision: gate this reply at all? (e.g. only in group/supergroup chats.) */
+    active: (ctx: BotContext) => boolean;
+    /** Return the safe version of `chunk` (verbatim when nothing is sensitive). Runs before the chunk is sent. */
+    check: (input: OutputGuardInput) => Promise<string>;
+};
+type TelegramWebhookConfig = {
+    /** Public URL Telegram should POST updates to. Must resolve to this app's `/<botName>/webhook` route. */
+    url: string;
+    /** Optional secret token; validated by grammy's webhook callback. */
+    secret?: string;
+};
+type TelegramBotInfo = {
+    id: number;
+    username?: string;
+    name: string;
+};
+type TelegramBotConfig = {
+    /**
+     * Bot token — nitro-bot constructs the grammy `Bot` for you. Prefer this: it avoids the
+     * dual-package type clash you hit when a linked/duplicate `grammy` builds the instance.
+     * Provide either `token` or `bot`.
+     */
+    token?: string;
+    /** Live grammy Bot instance, if you need full control (custom middleware, transformers, …). */
+    bot?: Bot;
+    /** Displayed as `ctx.bot.name`. Falls back to grammy's `botInfo.first_name` after start. */
+    name?: string;
+    /**
+     * Use Telegram's `sendMessageDraft` streaming when eligible (text-only, private chat).
+     * Defaults to `true`. Falls back to edit-loop for ineligible cases.
+     */
+    draftStreaming?: boolean;
+    /**
+     * Run the bot in webhook mode instead of long-polling. nitro-bot mounts the receiving route at
+     * `/<botName>/webhook` (e.g. `/telegram/webhook`); point `url` at that path on your public host.
+     */
+    webhook?: TelegramWebhookConfig;
+    /**
+     * Called once after the bot is initialized (botInfo available) but before it starts handling
+     * updates. Use for app bootstrap: DB migrations, warming caches, syncing remote config, etc.
+     */
+    onStart?: (ctx: {
+        bot: Bot;
+        info: TelegramBotInfo;
+    }) => void | Promise<void>;
+    /**
+     * Built-in tools auto-provided to this bot (both default on). `sendFile` lets the model deliver files;
+     * `react` lets it acknowledge a message with an emoji reaction.
+     */
+    builtins?: {
+        sendFile?: boolean;
+        react?: boolean;
+    };
+    /**
+     * Optional streaming output guard. When `active(ctx)` is true, the assistant's reply is buffered and
+     * each completed chunk is passed through `check` before being sent — redacting sensitive content in
+     * place without ever sending-then-editing. Use it to scrub e.g. internal ids / pay / PII out of group
+     * replies while leaving private (admin) chats untouched.
+     */
+    guard?: OutputGuard;
+};
+/** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */
+declare function defineTelegramBot(config: TelegramBotConfig): TelegramBotConfig;
+
+type RunAgentOptions = {
+    prompt: string;
+    tools: ToolSet;
+    model: LanguageModel;
+    systemPrompt?: string;
+    maxSteps?: number;
+};
+type RunAgentResult = {
+    text: string;
+    steps: number;
+};
+declare function runAgent(options: RunAgentOptions): Promise<RunAgentResult>;
+type StreamAgentOptions = {
+    tools: ToolSet;
+    model: LanguageModel;
+    systemPrompt?: string;
+    maxSteps?: number;
+    /** Full conversation history (including the current user turn). Takes precedence over `prompt`. */
+    messages?: ModelMessage[];
+    /** Used only when `messages` is empty — a single user prompt. */
+    prompt?: string;
+    /** Called for each text chunk as the model streams its final answer. */
+    onDelta?: (delta: string) => void;
+    /** Called when the model invokes a tool — useful for a live `🔧 <name>` trail. */
+    onToolCall?: (name: string) => void;
+};
+/**
+ * Streaming counterpart to {@link runAgent}. Drives an agent loop with `streamText`, forwarding text
+ * deltas (and optional tool-call events) through callbacks, and resolves to the final text + step count.
+ * Run it inside `botContextStorage.run(ctx, () => runAgentStream(...))` so tool routes see the live
+ * BotContext on `event.context` exactly like the Telegram transport.
+ */
+declare function runAgentStream(options: StreamAgentOptions): Promise<RunAgentResult>;
 
 /** A single event from {@link runAgentEventStream}: a text chunk or a tool invocation. */
 type AgentEvent = {
@@ -501,5 +529,5 @@ declare function defineSubagent(def: {
 }): SubagentDefinition;
 declare function isSubagentDefinition(value: unknown): value is SubagentDefinition;
 
-export { runAgentEventStream as $, botPre as D, botTool as E, buildBotToolSet as F, buildToolSet as G, createChatHandler as J, createSessionChatHandler as K, defaultInvoke as L, defineChatSession as M, defineSubagent as O, defineTelegramBot as P, getBot as Q, getBotContext as U, isBotToolDefinition as V, isSubagentDefinition as W, isToolDefinition as X, registerBot as Y, resolveChatConfig as Z, runAgent as _, runAgentStream as a0, tool as a1, botCommand as x, botContextStorage as y, botPost as z };
-export type { AgentEvent as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotContext as c, BotEntry as d, BotPostFn as e, BotPreFn as f, BotToolDefinition as g, ChatOptions as h, ChatReply as i, ChatResponse as j, ChatSessionDef as k, ChatSessionResolved as l, CommandContext as m, ResolvedChatConfig as n, RunAgentOptions as o, RunAgentResult as p, StreamAgentOptions as q, SubagentDefinition as r, TelegramBotInfo as s, TelegramWebhookConfig as t, ToolDefinition as u, ToolInput as v, ToolRoute as w };
+export { resolveChatConfig as $, botPost as D, botPre as E, botTool as F, buildBotToolSet as G, buildToolSet as J, createChatHandler as K, createSessionChatHandler as L, defaultInvoke as M, defineChatSession as P, defineSubagent as Q, defineTelegramBot as U, getBot as V, getBotContext as W, isBotToolDefinition as X, isSubagentDefinition as Y, isToolDefinition as Z, registerBot as _, runAgent as a0, runAgentEventStream as a1, runAgentStream as a2, tool as a3, botCommand as y, botContextStorage as z };
+export type { AgentEvent as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, OutputGuard as O, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotContext as c, BotEntry as d, BotPostFn as e, BotPreFn as f, BotToolDefinition as g, ChatOptions as h, ChatReply as i, ChatResponse as j, ChatSessionDef as k, ChatSessionResolved as l, CommandContext as m, OutputGuardInput as n, ResolvedChatConfig as o, RunAgentOptions as p, RunAgentResult as q, StreamAgentOptions as r, SubagentDefinition as s, TelegramBotInfo as t, TelegramWebhookConfig as u, ToolDefinition as v, ToolInput as w, ToolRoute as x };

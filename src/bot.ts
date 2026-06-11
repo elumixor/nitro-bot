@@ -168,6 +168,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
               hiddenTools,
               model: chatConfig.model,
               maxSteps: chatConfig.maxSteps,
+              guard: botConfig.guard,
               onFinish: async (result) => {
                 botCtx.agent.result = result;
                 for (const fn of post) {

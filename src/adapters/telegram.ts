@@ -1,4 +1,28 @@
 import type { Bot } from "grammy";
+import type { BotContext } from "../types";
+
+/** Input handed to an `OutputGuard.check` for one not-yet-sent slice of the assistant's reply. */
+export type OutputGuardInput = {
+  /** A completed slice of the reply (whole sentences/lines) that has NOT been sent to the chat yet. */
+  chunk: string;
+  /** Text already cleared and sent before this chunk — pass as context so cross-chunk leaks are caught. */
+  precedingText: string;
+  /** Live bot context (chat type, user, thread, …). */
+  ctx: BotContext;
+};
+
+/**
+ * Streaming output guard. When `active(ctx)` is true for a reply, nitro-bot buffers the streamed answer
+ * and runs each completed chunk through `check` BEFORE it is sent to the chat — so sensitive content is
+ * redacted *before* the user ever sees it (no send-then-edit). When `active` is false the reply streams
+ * normally (draft streaming intact). Inactive replies never call `check`.
+ */
+export type OutputGuard = {
+  /** Cheap, synchronous decision: gate this reply at all? (e.g. only in group/supergroup chats.) */
+  active: (ctx: BotContext) => boolean;
+  /** Return the safe version of `chunk` (verbatim when nothing is sensitive). Runs before the chunk is sent. */
+  check: (input: OutputGuardInput) => Promise<string>;
+};
 
 export type TelegramWebhookConfig = {
   /** Public URL Telegram should POST updates to. Must resolve to this app's `/<botName>/webhook` route. */
@@ -40,6 +64,13 @@ export type TelegramBotConfig = {
    * `react` lets it acknowledge a message with an emoji reaction.
    */
   builtins?: { sendFile?: boolean; react?: boolean };
+  /**
+   * Optional streaming output guard. When `active(ctx)` is true, the assistant's reply is buffered and
+   * each completed chunk is passed through `check` before being sent — redacting sensitive content in
+   * place without ever sending-then-editing. Use it to scrub e.g. internal ids / pay / PII out of group
+   * replies while leaving private (admin) chats untouched.
+   */
+  guard?: OutputGuard;
 };
 
 /** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */
