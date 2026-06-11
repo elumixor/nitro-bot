@@ -1,4 +1,5 @@
 import type { Bot } from "grammy";
+import type { UserFromGetMe } from "grammy/types";
 import type { BotContext } from "../types";
 
 /** Input handed to an `OutputGuard.check` for one not-yet-sent slice of the assistant's reply. */
@@ -55,6 +56,16 @@ export type TelegramBotConfig = {
   token?: string;
   /** Live grammy Bot instance, if you need full control (custom middleware, transformers, …). */
   bot?: Bot;
+  /**
+   * Pre-known bot identity (`id`, `username`, `first_name`, the bot capability flags). Provide this and
+   * grammy never calls `getMe` — the bot can handle updates with zero network round-trips, so the webhook
+   * receiver is registered immediately on boot.
+   *
+   * **Strongly recommended on serverless.** A cold Vercel/Lambda instance often fails its first outbound
+   * request, so a `getMe`-on-boot would throw and leave that instance returning 503 to Telegram until it
+   * warms. With `botInfo` set there's no such call, so every instance serves the webhook on first boot.
+   */
+  botInfo?: UserFromGetMe;
   /** Displayed as `ctx.bot.name`. Falls back to grammy's `botInfo.first_name` after start. */
   name?: string;
   /**

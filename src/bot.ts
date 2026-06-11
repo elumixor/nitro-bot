@@ -52,7 +52,10 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
   const { draftStreaming = true, webhook, onStart } = botConfig;
   if (!botConfig.bot && !botConfig.token)
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
-  const bot = botConfig.bot ?? new Bot(botConfig.token as string);
+  // Passing `botInfo` lets grammy skip the `getMe` network call entirely — the bot is "initialized" at
+  // construction, so it can handle updates immediately (critical on serverless cold starts).
+  const bot =
+    botConfig.bot ?? new Bot(botConfig.token as string, botConfig.botInfo ? { botInfo: botConfig.botInfo } : undefined);
   const registryName = options.name ?? "telegram";
 
   const builtins = [
@@ -199,6 +202,62 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
       if (!webhook) await bot.stop().catch(() => {});
     });
 
+    // The webhook receiver: validates the secret, dedupes, hands the update to grammy. Pure — needs no
+    // network — so it can be registered the instant the bot is initialized.
+    const buildWebhookHandler = (hook: NonNullable<typeof webhook>) => {
+      // Idempotency by (chat, message) — NOT by update_id. Telegram can deliver the same user message
+      // as two updates with different update_ids (observed in supergroups), which would otherwise drive
+      // two independent agent runs and two replies. We dedupe on `${chat}:${message_id}` within a short
+      // window so a repeated delivery is acked 200 but not re-processed.
+      const seenMessages = new Map<string, { firstUpdateId?: number; t: number }>();
+      const DEDUPE_TTL_MS = 5 * 60_000;
+      return async (req: Request): Promise<Response> => {
+        if (hook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== hook.secret)
+          return new Response("unauthorized", { status: 401 });
+        let update: Parameters<typeof bot.handleUpdate>[0];
+        try {
+          update = (await req.json()) as Parameters<typeof bot.handleUpdate>[0];
+        } catch {
+          return new Response("bad request", { status: 400 });
+        }
+        const msg = (update as { message?: { message_id?: number; chat?: { id?: number } } }).message;
+        if (msg?.message_id !== undefined && msg.chat?.id !== undefined) {
+          const key = `${msg.chat.id}:${msg.message_id}`;
+          const now = Date.now();
+          for (const [k, v] of seenMessages) if (now - v.t > DEDUPE_TTL_MS) seenMessages.delete(k);
+          const prior = seenMessages.get(key);
+          if (prior) {
+            console.error(
+              `[nitro-bot] dropping duplicate delivery of ${key}: update ${update.update_id} (already processed as update ${prior.firstUpdateId})`,
+            );
+            return new Response(null, { status: 200 });
+          }
+          seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
+        }
+        // On serverless the instance freezes once we respond, so a backgrounded agent turn is killed
+        // mid-reply. `awaitProcessing` blocks the 200 until the turn (and its streamed reply) finishes.
+        const processing = bot
+          .handleUpdate(update)
+          .catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
+        if (hook.awaitProcessing) await processing;
+        return new Response(null, { status: 200 });
+      };
+    };
+
+    // Register the receiver as early as possible. When the bot is already initialized — i.e. `botInfo` was
+    // supplied (recommended on serverless) or a pre-inited `bot` was passed — it can handle updates with no
+    // network at all, so we register here, BEFORE the flaky `getMe`/`setWebhook` below. That way a cold
+    // serverless instance answers Telegram with 200 on its very first request instead of 503-until-warm.
+    let webhookRegistered = false;
+    if (webhook && bot.isInited()) {
+      if (!/^https:\/\//i.test(webhook.url))
+        console.error(`[nitro-bot] webhook.url must be https, got "${webhook.url}" — receiver not registered.`);
+      else {
+        registerBot(registryName, { bot, handleUpdate: buildWebhookHandler(webhook) });
+        webhookRegistered = true;
+      }
+    }
+
     // The bot shares this process with the host's HTTP API. Bringing the bot up must NEVER crash the
     // server — a bad token, a non-https/unreachable webhook URL, or any Telegram error would otherwise
     // take the whole API down. Log and keep serving; the webhook receiver route is mounted separately,
@@ -223,7 +282,8 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
     };
 
     try {
-      const me = await withRetry("getMe", () => bot.api.getMe());
+      // When already initialized (botInfo supplied), use it — no network. Otherwise fetch it, with retries.
+      const me = bot.isInited() ? bot.botInfo : await withRetry("getMe", () => bot.api.getMe());
       const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
 
       if (namedCommands.length > 0)
@@ -236,50 +296,13 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
       if (webhook) {
         if (!/^https:\/\//i.test(webhook.url))
           throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
-        await bot.init();
-        // Respond 200 to Telegram immediately, then process the update in the background. Blocking the
-        // HTTP response until the (streaming, multi-second) agent finished would let Telegram time out
-        // and re-deliver the same update — producing duplicate replies.
-        // Idempotency by (chat, message) — NOT by update_id. Telegram can deliver the same user message
-        // as two updates with different update_ids (observed in supergroups), which would otherwise drive
-        // two independent agent runs and two replies. We dedupe on `${chat}:${message_id}` within a short
-        // window so a repeated delivery is acked 200 but not re-processed.
-        const seenMessages = new Map<string, { firstUpdateId?: number; t: number }>();
-        const DEDUPE_TTL_MS = 5 * 60_000;
-        const handleUpdate = async (req: Request): Promise<Response> => {
-          if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
-            return new Response("unauthorized", { status: 401 });
-          let update: Parameters<typeof bot.handleUpdate>[0];
-          try {
-            update = (await req.json()) as Parameters<typeof bot.handleUpdate>[0];
-          } catch {
-            return new Response("bad request", { status: 400 });
-          }
-          const msg = (update as { message?: { message_id?: number; chat?: { id?: number } } }).message;
-          if (msg?.message_id !== undefined && msg.chat?.id !== undefined) {
-            const key = `${msg.chat.id}:${msg.message_id}`;
-            const now = Date.now();
-            for (const [k, v] of seenMessages) if (now - v.t > DEDUPE_TTL_MS) seenMessages.delete(k);
-            const prior = seenMessages.get(key);
-            if (prior) {
-              // The two deliveries' update_ids reveal whether a second bot/webhook is mirroring this chat:
-              // a single bot's ids are monotonic, so wildly different ids = two delivery streams.
-              console.error(
-                `[nitro-bot] dropping duplicate delivery of ${key}: update ${update.update_id} (already processed as update ${prior.firstUpdateId})`,
-              );
-              return new Response(null, { status: 200 });
-            }
-            seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
-          }
-          // On serverless the instance freezes once we respond, so a backgrounded agent turn is killed
-          // mid-reply. `awaitProcessing` blocks the 200 until the turn (and its streamed reply) finishes.
-          const processing = bot
-            .handleUpdate(update)
-            .catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
-          if (webhook.awaitProcessing) await processing;
-          return new Response(null, { status: 200 });
-        };
-        registerBot(registryName, { bot, handleUpdate });
+        // Not already registered early (no botInfo / not pre-inited) — init now and register. `bot.init()`
+        // is a no-op when botInfo was supplied.
+        if (!webhookRegistered) {
+          await bot.init();
+          registerBot(registryName, { bot, handleUpdate: buildWebhookHandler(webhook) });
+          webhookRegistered = true;
+        }
         await withRetry("setWebhook", () => bot.api.setWebhook(webhook.url, { secret_token: webhook.secret }));
       } else {
         registerBot(registryName, { bot });
