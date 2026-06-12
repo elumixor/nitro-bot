@@ -125,8 +125,15 @@ function extractHandlerSchema(project: Project, absPath: string): ExtractedSchem
 
   const bodyProp = firstArg.getProperty("body");
   const queryProp = firstArg.getProperty("query");
-  const bodyText = readPropertyText(bodyProp);
-  const queryText = readPropertyText(queryProp);
+
+  const importMap = buildImportMap(sourceFile);
+  // A schema passed as a bare identifier that points to a *local* const (not an import) has no
+  // definition in the generated handler, so inline the const's initializer; an imported identifier
+  // is left as-is and re-imported by collectSchemaImports.
+  const bodyInit = resolveSchemaNode(getInitializer(bodyProp), sourceFile, importMap);
+  const queryInit = resolveSchemaNode(getInitializer(queryProp), sourceFile, importMap);
+  const bodyText = bodyInit?.getText();
+  const queryText = queryInit?.getText();
 
   // If the schema references `definition.input` (DRY pattern), skip autoInput entirely —
   // the tool's own definition.input is used at runtime by buildToolSet.
@@ -136,14 +143,27 @@ function extractHandlerSchema(project: Project, absPath: string): ExtractedSchem
 
   // The schema text is inlined verbatim into the generated handler, so any symbol it references
   // (typically a Prisma enum like `z.enum(PersonStatus)`) must be imported there too.
-  const initializers = [bodyProp, queryProp]
-    .map((prop) =>
-      prop && Node.isPropertyAssignment(prop) ? (prop as PropertyAssignment).getInitializer() : undefined,
-    )
-    .filter((node) => node !== undefined);
+  const initializers = [bodyInit, queryInit].filter((node): node is Node => node !== undefined);
   const imports = collectSchemaImports(sourceFile, initializers, absPath);
 
   return { bodyText, queryText, imports: imports.length > 0 ? imports : undefined };
+}
+
+function getInitializer(prop: Node | undefined): Node | undefined {
+  return prop && Node.isPropertyAssignment(prop) ? (prop as PropertyAssignment).getInitializer() : undefined;
+}
+
+/** Inline a bare identifier that resolves to a local variable so the generated handler is self-contained. */
+function resolveSchemaNode(
+  node: Node | undefined,
+  sourceFile: ReturnType<Project["addSourceFileAtPath"]>,
+  importMap: Map<string, string>,
+): Node | undefined {
+  if (!node || !Node.isIdentifier(node)) return node;
+  const name = node.getText();
+  if (importMap.has(name)) return node; // imported — re-emitted by collectSchemaImports
+  const initializer = sourceFile.getVariableDeclaration(name)?.getInitializer();
+  return initializer ?? node;
 }
 
 /** Map each imported local name in the file to the module it comes from (named, default, and namespace imports). */
@@ -200,10 +220,4 @@ function unwrapCall(expression: Node | undefined): Node | undefined {
   let current: Node | undefined = expression;
   while (current && Node.isAsExpression(current)) current = current.getExpression();
   return current;
-}
-
-function readPropertyText(property: Node | undefined): string | undefined {
-  if (!property || !Node.isPropertyAssignment(property)) return undefined;
-  const initializer = (property as PropertyAssignment).getInitializer();
-  return initializer?.getText();
 }

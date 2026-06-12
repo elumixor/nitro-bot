@@ -106,15 +106,26 @@ function extractHandlerSchema(project, absPath) {
   if (!firstArg || !Node.isObjectLiteralExpression(firstArg)) return void 0;
   const bodyProp = firstArg.getProperty("body");
   const queryProp = firstArg.getProperty("query");
-  const bodyText = readPropertyText(bodyProp);
-  const queryText = readPropertyText(queryProp);
+  const importMap = buildImportMap(sourceFile);
+  const bodyInit = resolveSchemaNode(getInitializer(bodyProp), sourceFile, importMap);
+  const queryInit = resolveSchemaNode(getInitializer(queryProp), sourceFile, importMap);
+  const bodyText = bodyInit?.getText();
+  const queryText = queryInit?.getText();
   if (referencesDefinition(bodyText) || referencesDefinition(queryText)) return void 0;
   if (!bodyText && !queryText) return void 0;
-  const initializers = [bodyProp, queryProp].map(
-    (prop) => prop && Node.isPropertyAssignment(prop) ? prop.getInitializer() : void 0
-  ).filter((node) => node !== void 0);
+  const initializers = [bodyInit, queryInit].filter((node) => node !== void 0);
   const imports = collectSchemaImports(sourceFile, initializers, absPath);
   return { bodyText, queryText, imports: imports.length > 0 ? imports : void 0 };
+}
+function getInitializer(prop) {
+  return prop && Node.isPropertyAssignment(prop) ? prop.getInitializer() : void 0;
+}
+function resolveSchemaNode(node, sourceFile, importMap) {
+  if (!node || !Node.isIdentifier(node)) return node;
+  const name = node.getText();
+  if (importMap.has(name)) return node;
+  const initializer = sourceFile.getVariableDeclaration(name)?.getInitializer();
+  return initializer ?? node;
 }
 function buildImportMap(sourceFile) {
   const map = /* @__PURE__ */ new Map();
@@ -156,11 +167,6 @@ function unwrapCall(expression) {
   let current = expression;
   while (current && Node.isAsExpression(current)) current = current.getExpression();
   return current;
-}
-function readPropertyText(property) {
-  if (!property || !Node.isPropertyAssignment(property)) return void 0;
-  const initializer = property.getInitializer();
-  return initializer?.getText();
 }
 
 function nitroBotModule(config = {}) {

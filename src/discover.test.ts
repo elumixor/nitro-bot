@@ -14,6 +14,7 @@ describe("discoverToolRoutes against the example app", () => {
       "GET /weather",
       "PATCH /people/:id/notes/:noteId",
       "POST /add",
+      "POST /echo",
       "POST /greet",
       "POST /people",
       "POST /people/:id/status",
@@ -27,6 +28,16 @@ describe("discoverToolRoutes against the example app", () => {
     const imports = create?.schema?.imports ?? [];
     expect(imports.map((i) => i.name)).toEqual(["personSchema"]);
     expect(imports[0]?.specifier.endsWith("/example/src/person-schema")).toBe(true);
+  });
+
+  test("inlines a bare-identifier body schema that points to a local const", async () => {
+    const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
+    const echo = routes.find((r) => r.path === "/echo");
+    // The const initializer is inlined verbatim, not left as the bare `echoSchema` name.
+    expect(echo?.schema?.bodyText).toContain("message: z.string()");
+    expect(echo?.schema?.bodyText).toContain("loud: z.boolean().optional()");
+    expect(echo?.schema?.bodyText).not.toBe("echoSchema");
+    expect(echo?.schema?.imports).toBeUndefined();
   });
 
   test("collects imported symbols referenced inside a schema (e.g. an enum) for re-emission", async () => {
