@@ -1,4 +1,5 @@
 import { Bot } from 'grammy';
+import { UserFromGetMe } from 'grammy/types';
 import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
@@ -138,6 +139,19 @@ type TelegramWebhookConfig = {
     url: string;
     /** Optional secret token; validated by grammy's webhook callback. */
     secret?: string;
+    /**
+     * Await full update processing (the whole agent turn, including the streamed reply) before responding
+     * 200 to Telegram, instead of acking immediately and processing in the background.
+     *
+     * **Required on serverless (Vercel, AWS Lambda, …).** There the instance is frozen the moment the HTTP
+     * response is sent, so a backgrounded `bot.handleUpdate` — a multi-second streaming agent — is killed
+     * mid-flight and the user never gets a reply. Awaiting keeps the function alive for the whole turn.
+     * Duplicate redelivery (Telegram retries if the response is slow) is already guarded by the per-message
+     * dedupe, so the cost is only that Telegram holds the connection open until the reply is done.
+     *
+     * Defaults to `false` (ack-then-background), which is correct on a long-lived server.
+     */
+    awaitProcessing?: boolean;
 };
 type TelegramBotInfo = {
     id: number;
@@ -153,6 +167,16 @@ type TelegramBotConfig = {
     token?: string;
     /** Live grammy Bot instance, if you need full control (custom middleware, transformers, …). */
     bot?: Bot;
+    /**
+     * Pre-known bot identity (`id`, `username`, `first_name`, the bot capability flags). Provide this and
+     * grammy never calls `getMe` — the bot can handle updates with zero network round-trips, so the webhook
+     * receiver is registered immediately on boot.
+     *
+     * **Strongly recommended on serverless.** A cold Vercel/Lambda instance often fails its first outbound
+     * request, so a `getMe`-on-boot would throw and leave that instance returning 503 to Telegram until it
+     * warms. With `botInfo` set there's no such call, so every instance serves the webhook on first boot.
+     */
+    botInfo?: UserFromGetMe;
     /** Displayed as `ctx.bot.name`. Falls back to grammy's `botInfo.first_name` after start. */
     name?: string;
     /**

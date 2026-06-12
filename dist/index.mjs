@@ -135,7 +135,9 @@ function collectSchemaImports(sourceFile, nodes, absPath) {
   const importMap = buildImportMap(sourceFile);
   const found = /* @__PURE__ */ new Map();
   for (const node of nodes) {
-    for (const identifier of node.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    const identifiers = node.getDescendantsOfKind(SyntaxKind.Identifier);
+    if (Node.isIdentifier(node)) identifiers.unshift(node);
+    for (const identifier of identifiers) {
       const name = identifier.getText();
       if (name === "z" || found.has(name)) continue;
       const specifier = importMap.get(name);

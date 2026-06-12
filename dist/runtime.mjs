@@ -12,6 +12,24 @@ import 'node:path';
 import 'h3';
 import 'node:async_hooks';
 
+function errorMessage(error) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const o = error;
+    if (typeof o.message === "string") return o.message;
+    const nested = o.error;
+    if (nested && typeof nested === "object" && typeof nested.message === "string")
+      return nested.message;
+    if (typeof nested === "string") return nested;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
+}
 const MAX_REASONING_PREVIEW = 300;
 function lastFlushBoundary(text) {
   let boundary = -1;
@@ -128,7 +146,7 @@ function AgentReply({
               render();
               break;
             case "error":
-              throw new Error(String(part.error ?? "stream error"));
+              throw new Error(errorMessage(part.error) || "stream error");
             default:
               break;
           }
@@ -255,7 +273,7 @@ function startTelegramBot(options) {
   const { draftStreaming = true, webhook, onStart } = botConfig;
   if (!botConfig.bot && !botConfig.token)
     throw new Error("[nitro-bot] defineTelegramBot requires either `token` or `bot`.");
-  const bot = botConfig.bot ?? new Bot(botConfig.token);
+  const bot = botConfig.bot ?? new Bot(botConfig.token, botConfig.botInfo ? { botInfo: botConfig.botInfo } : void 0);
   const registryName = options.name ?? "telegram";
   const builtins = [
     ...botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin],
@@ -370,6 +388,46 @@ ${guide}` : guide;
       if (!webhook) await bot.stop().catch(() => {
       });
     });
+    const buildWebhookHandler = (hook) => {
+      const seenMessages = /* @__PURE__ */ new Map();
+      const DEDUPE_TTL_MS = 5 * 6e4;
+      return async (req) => {
+        if (hook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== hook.secret)
+          return new Response("unauthorized", { status: 401 });
+        let update;
+        try {
+          update = await req.json();
+        } catch {
+          return new Response("bad request", { status: 400 });
+        }
+        const msg = update.message;
+        if (msg?.message_id !== void 0 && msg.chat?.id !== void 0) {
+          const key = `${msg.chat.id}:${msg.message_id}`;
+          const now = Date.now();
+          for (const [k, v] of seenMessages) if (now - v.t > DEDUPE_TTL_MS) seenMessages.delete(k);
+          const prior = seenMessages.get(key);
+          if (prior) {
+            console.error(
+              `[nitro-bot] dropping duplicate delivery of ${key}: update ${update.update_id} (already processed as update ${prior.firstUpdateId})`
+            );
+            return new Response(null, { status: 200 });
+          }
+          seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
+        }
+        const processing = bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
+        if (hook.awaitProcessing) await processing;
+        return new Response(null, { status: 200 });
+      };
+    };
+    let webhookRegistered = false;
+    if (webhook && bot.isInited()) {
+      if (!/^https:\/\//i.test(webhook.url))
+        console.error(`[nitro-bot] webhook.url must be https, got "${webhook.url}" \u2014 receiver not registered.`);
+      else {
+        registerBot(registryName, { bot, handleUpdate: buildWebhookHandler(webhook) });
+        webhookRegistered = true;
+      }
+    }
     const withRetry = async (label, fn) => {
       let lastErr;
       for (let attempt = 1; attempt <= 5; attempt++) {
@@ -387,7 +445,7 @@ ${guide}` : guide;
       throw lastErr;
     };
     try {
-      const me = await withRetry("getMe", () => bot.api.getMe());
+      const me = bot.isInited() ? bot.botInfo : await withRetry("getMe", () => bot.api.getMe());
       const info = { id: me.id, username: me.username, name: botConfig.name ?? me.first_name };
       if (namedCommands.length > 0)
         await bot.api.setMyCommands(namedCommands.map((c) => ({ command: c.name, description: c.description }))).catch((err) => console.error("[nitro-bot] setMyCommands failed:", err));
@@ -395,36 +453,11 @@ ${guide}` : guide;
       if (webhook) {
         if (!/^https:\/\//i.test(webhook.url))
           throw new Error(`webhook.url must be an https URL, got "${webhook.url}".`);
-        await bot.init();
-        const seenMessages = /* @__PURE__ */ new Map();
-        const DEDUPE_TTL_MS = 5 * 6e4;
-        const handleUpdate = async (req) => {
-          if (webhook.secret && req.headers.get("x-telegram-bot-api-secret-token") !== webhook.secret)
-            return new Response("unauthorized", { status: 401 });
-          let update;
-          try {
-            update = await req.json();
-          } catch {
-            return new Response("bad request", { status: 400 });
-          }
-          const msg = update.message;
-          if (msg?.message_id !== void 0 && msg.chat?.id !== void 0) {
-            const key = `${msg.chat.id}:${msg.message_id}`;
-            const now = Date.now();
-            for (const [k, v] of seenMessages) if (now - v.t > DEDUPE_TTL_MS) seenMessages.delete(k);
-            const prior = seenMessages.get(key);
-            if (prior) {
-              console.error(
-                `[nitro-bot] dropping duplicate delivery of ${key}: update ${update.update_id} (already processed as update ${prior.firstUpdateId})`
-              );
-              return new Response(null, { status: 200 });
-            }
-            seenMessages.set(key, { firstUpdateId: update.update_id, t: now });
-          }
-          void bot.handleUpdate(update).catch((err) => console.error("[nitro-bot] handleUpdate error:", err));
-          return new Response(null, { status: 200 });
-        };
-        registerBot(registryName, { bot, handleUpdate });
+        if (!webhookRegistered) {
+          await bot.init();
+          registerBot(registryName, { bot, handleUpdate: buildWebhookHandler(webhook) });
+          webhookRegistered = true;
+        }
         await withRetry("setWebhook", () => bot.api.setWebhook(webhook.url, { secret_token: webhook.secret }));
       } else {
         registerBot(registryName, { bot });

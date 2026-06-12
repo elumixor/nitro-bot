@@ -172,7 +172,13 @@ function collectSchemaImports(
   const importMap = buildImportMap(sourceFile);
   const found = new Map<string, string>();
   for (const node of nodes) {
-    for (const identifier of node.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    // `getDescendantsOfKind` excludes the node itself, so a bare-identifier body
+    // (`body: customerSchema`) — as opposed to a member access (`schema.shape`)
+    // or object literal — would contribute no identifiers and its import would be
+    // dropped, leaving a ReferenceError in the generated handler. Include the node.
+    const identifiers = node.getDescendantsOfKind(SyntaxKind.Identifier);
+    if (Node.isIdentifier(node)) identifiers.unshift(node);
+    for (const identifier of identifiers) {
       const name = identifier.getText();
       // `z` is always imported by the generated handler; skip it and anything already collected.
       if (name === "z" || found.has(name)) continue;

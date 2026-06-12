@@ -15,8 +15,18 @@ describe("discoverToolRoutes against the example app", () => {
       "PATCH /people/:id/notes/:noteId",
       "POST /add",
       "POST /greet",
+      "POST /people",
       "POST /people/:id/status",
     ]);
+  });
+
+  test("collects a bare-identifier body schema import (regression: ReferenceError in handler)", async () => {
+    const routes = await discoverToolRoutes(EXAMPLE_ROUTES);
+    const create = routes.find((r) => r.path === "/people" && r.method === "POST");
+    expect(create?.schema?.bodyText).toBe("personSchema");
+    const imports = create?.schema?.imports ?? [];
+    expect(imports.map((i) => i.name)).toEqual(["personSchema"]);
+    expect(imports[0]?.specifier.endsWith("/example/src/person-schema")).toBe(true);
   });
 
   test("collects imported symbols referenced inside a schema (e.g. an enum) for re-emission", async () => {
