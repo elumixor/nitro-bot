@@ -6,13 +6,13 @@ import type { TelegramBotConfig } from "./adapters/telegram";
 import { AgentReply, StaticReply } from "./agent-reply";
 import { botContextStorage } from "./als";
 import { type AnyBotTool, buildBotToolSet } from "./bot-tool";
-import { reactBuiltin, sendFileBuiltin } from "./builtins";
+import { reactBuiltin, searchHistoryBuiltin, sendFileBuiltin } from "./builtins";
 import type { ToolRoute } from "./chat-handler";
 import type { BotCommandDef, CommandContext } from "./command";
 import { registerBot } from "./registry";
 import type { SubagentDefinition } from "./subagent";
 import { buildCoordinatorTools, delegationGuide } from "./supervisor";
-import type { BotContext, BotPostFn, BotPreFn, ChatReply } from "./types";
+import type { BotAttachment, BotContext, BotPostFn, BotPreFn, ChatReply } from "./types";
 
 type ExecutableTool = { execute?: (input: unknown, options: unknown) => Promise<unknown> };
 
@@ -58,9 +58,10 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
     botConfig.bot ?? new Bot(botConfig.token as string, botConfig.botInfo ? { botInfo: botConfig.botInfo } : undefined);
   const registryName = options.name ?? "telegram";
 
-  const builtins = [
+  const builtins: AnyBotTool[] = [
     ...(botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin]),
     ...(botConfig.builtins?.react === false ? [] : [reactBuiltin]),
+    ...(botConfig.history?.search ? [searchHistoryBuiltin(botConfig.history.search)] : []),
   ];
   const allBotTools = [...builtins, ...botTools];
   const allTools: ToolSet = { ...tools, ...buildBotToolSet(allBotTools) };
@@ -134,60 +135,107 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
       });
     }
 
+    // One agent turn shared by text and attachment messages: load history → run pre-middleware → run the
+    // agent over [history, userMessage] → on finish, persist the turn and run post-middleware. `userText`
+    // is the plain-text form stored in history (an attachment's bytes can't be persisted as a message).
+    const runTurn = async (ctx: Context, botCtx: BotContext, userMessage: ModelMessage, userText: string) => {
+      if (botConfig.history?.load) {
+        try {
+          botCtx.agent.messages = await botConfig.history.load(botCtx);
+        } catch (err) {
+          console.error("[nitro-bot] history.load error:", err instanceof Error ? err.stack : err);
+        }
+      }
+
+      for (const fn of pre) {
+        if ((await fn(botCtx)) === false) return;
+      }
+
+      // With subagents declared, teach the coordinator to delegate (appended after middleware sets the base prompt).
+      if (subagents.length > 0) {
+        const guide = delegationGuide(subagents);
+        botCtx.agent.systemPrompt = botCtx.agent.systemPrompt ? `${botCtx.agent.systemPrompt}\n\n${guide}` : guide;
+      }
+
+      const messages: ModelMessage[] = [...botCtx.agent.messages, userMessage];
+
+      const renderer = new TelegramRenderer(ctx, { draftStreaming } as ConstructorParameters<
+        typeof TelegramRenderer
+      >[1]);
+
+      await botContextStorage.run(botCtx, () =>
+        renderer.render(
+          createElement(AgentReply, {
+            messages,
+            system: botCtx.agent.systemPrompt,
+            tools: coordinatorTools,
+            hiddenTools,
+            model: chatConfig.model,
+            maxSteps: chatConfig.maxSteps,
+            guard: botConfig.guard,
+            onFinish: async (result) => {
+              botCtx.agent.result = result;
+              if (botConfig.history?.save) {
+                try {
+                  await botConfig.history.save(botCtx, { user: userText, assistant: result.text });
+                } catch (err) {
+                  console.error("[nitro-bot] history.save error:", err instanceof Error ? err.stack : err);
+                }
+              }
+              for (const fn of post) {
+                try {
+                  await fn(botCtx as Parameters<BotPostFn>[0]);
+                } catch (err) {
+                  console.error("[nitro-bot] post-middleware error:", err);
+                }
+              }
+            },
+          }),
+        ),
+      );
+    };
+
     bot.on("message:text", async (ctx) => {
       try {
         const botCtx = buildBotContext(ctx, botConfig);
         if (!botCtx) return;
         // Slash commands are handled above — don't also route them through the agent.
         if (botCtx.message.text.startsWith("/")) return;
-
-        for (const fn of pre) {
-          const result = await fn(botCtx);
-          if (result === false) return;
-        }
-
-        // With subagents declared, teach the coordinator to delegate (appended after middleware sets the base prompt).
-        if (subagents.length > 0) {
-          const guide = delegationGuide(subagents);
-          botCtx.agent.systemPrompt = botCtx.agent.systemPrompt ? `${botCtx.agent.systemPrompt}\n\n${guide}` : guide;
-        }
-
-        const messages: ModelMessage[] = [...botCtx.agent.messages];
-        const last = messages[messages.length - 1];
-        if (!last || last.role !== "user" || last.content !== botCtx.message.text) {
-          messages.push({ role: "user", content: botCtx.message.text });
-        }
-
-        const renderer = new TelegramRenderer(ctx, { draftStreaming } as ConstructorParameters<
-          typeof TelegramRenderer
-        >[1]);
-
-        await botContextStorage.run(botCtx, () =>
-          renderer.render(
-            createElement(AgentReply, {
-              messages,
-              system: botCtx.agent.systemPrompt,
-              tools: coordinatorTools,
-              hiddenTools,
-              model: chatConfig.model,
-              maxSteps: chatConfig.maxSteps,
-              guard: botConfig.guard,
-              onFinish: async (result) => {
-                botCtx.agent.result = result;
-                for (const fn of post) {
-                  try {
-                    await fn(botCtx as Parameters<BotPostFn>[0]);
-                  } catch (err) {
-                    console.error("[nitro-bot] post-middleware error:", err);
-                  }
-                }
-              },
-            }),
-          ),
-        );
+        await runTurn(ctx, botCtx, { role: "user", content: botCtx.message.text }, botCtx.message.text);
       } catch (err) {
         console.error("[nitro-bot] message handler error:", err instanceof Error ? err.stack : err);
         await ctx.reply("⚠️ Something went wrong handling your message.").catch(() => {});
+      }
+    });
+
+    // Documents and photos go to the agent, not a hardcoded pipeline: download the file, attach it to the
+    // context (so a tool can read its bytes via `ctx.message.attachment`), AND hand it to the model as a
+    // multimodal part so it can see the file, classify it, and pick the right tool. The caption is the prompt.
+    bot.on(["message:document", "message:photo"], async (ctx) => {
+      try {
+        const botCtx = buildBotContext(ctx, botConfig);
+        if (!botCtx) return;
+        const attachment = await downloadAttachment(ctx, bot.token);
+        if (!attachment) return;
+        botCtx.message.attachment = attachment;
+
+        const caption = (ctx.message?.caption ?? "").trim();
+        const userMessage: ModelMessage = {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                caption || `(The user sent a ${attachment.kind}: ${attachment.filename}. Decide what to do with it.)`,
+            },
+            { type: "file", data: attachment.bytes, mediaType: attachment.mediaType, filename: attachment.filename },
+          ],
+        };
+        const label = `[${attachment.kind} ${attachment.filename}]`;
+        await runTurn(ctx, botCtx, userMessage, caption ? `${label} ${caption}` : label);
+      } catch (err) {
+        console.error("[nitro-bot] attachment handler error:", err instanceof Error ? err.stack : err);
+        await ctx.reply("⚠️ Something went wrong handling your file.").catch(() => {});
       }
     });
 
@@ -322,7 +370,8 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
 
 function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | null {
   const msg = ctx.message;
-  if (!msg?.text || !ctx.chat || !ctx.from) return null;
+  // Text, document, and photo messages all reach here; only the bare envelope (chat + sender) is required.
+  if (!msg || !ctx.chat || !ctx.from) return null;
 
   const chatType = ctx.chat.type as BotContext["thread"]["type"];
   const fallbackName = ctx.me?.first_name ?? "bot";
@@ -359,7 +408,7 @@ function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | 
   return {
     bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
     message: {
-      text: msg.text,
+      text: msg.text ?? msg.caption ?? "",
       id: msg.message_id,
       replyToId: replyTo?.message_id,
       replyToText: replyTo?.text ?? replyTo?.caption,
@@ -384,4 +433,35 @@ function buildBotContext(ctx: Context, config: TelegramBotConfig): BotContext | 
     reply,
     context: {},
   };
+}
+
+/** Download the document or largest photo on the current message from Telegram. Returns null if absent. */
+async function downloadAttachment(ctx: Context, token: string): Promise<BotAttachment | null> {
+  const doc = ctx.message?.document;
+  const photo = ctx.message?.photo?.at(-1);
+
+  let fileId: string;
+  let mediaType: string;
+  let filename: string;
+  let kind: "document" | "photo";
+  if (doc) {
+    fileId = doc.file_id;
+    mediaType = doc.mime_type ?? "application/octet-stream";
+    filename = doc.file_name ?? "document";
+    kind = "document";
+  } else if (photo) {
+    // Photos carry no name/mime; Telegram always serves them as JPEG.
+    fileId = photo.file_id;
+    mediaType = "image/jpeg";
+    filename = "photo.jpg";
+    kind = "photo";
+  } else {
+    return null;
+  }
+
+  const file = await ctx.api.getFile(fileId);
+  if (!file.file_path) return null;
+  const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  if (!res.ok) throw new Error(`Telegram file download failed: ${res.status} ${res.statusText}`);
+  return { bytes: Buffer.from(await res.arrayBuffer()), mediaType, filename, kind };
 }

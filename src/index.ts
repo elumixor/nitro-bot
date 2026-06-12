@@ -43,11 +43,14 @@ export { type RunAgentSessionOptions, runAgentSession } from "./session-stream";
 export { defineSubagent, isSubagentDefinition, type SubagentDefinition } from "./subagent";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
 export {
+  type BotAttachment,
   type BotContext,
+  type BotHistory,
   type BotPostFn,
   type BotPreFn,
   botPost,
   botPre,
   type ChatReply,
+  type HistoryMessage,
   type NitroBotContext,
 } from "./types";

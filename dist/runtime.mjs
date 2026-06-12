@@ -1,5 +1,5 @@
-import { i as getBotContext, l as runAgent, s as sendFileBuiltin, r as reactBuiltin, c as buildBotToolSet, b as botContextStorage, k as registerBot } from './shared/nitro-bot.BLiAuwxU.mjs';
-export { f as createSessionChatHandler, h as getBot, m as runAgentEventStream, n as runAgentStream } from './shared/nitro-bot.BLiAuwxU.mjs';
+import { i as getBotContext, l as runAgent, o as sendFileBuiltin, r as reactBuiltin, s as searchHistoryBuiltin, c as buildBotToolSet, b as botContextStorage, k as registerBot } from './shared/nitro-bot.DGLPJw5h.mjs';
+export { f as createSessionChatHandler, h as getBot, m as runAgentEventStream, n as runAgentStream } from './shared/nitro-bot.DGLPJw5h.mjs';
 import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
 import { streamText, stepCountIs, tool } from 'ai';
@@ -277,7 +277,8 @@ function startTelegramBot(options) {
   const registryName = options.name ?? "telegram";
   const builtins = [
     ...botConfig.builtins?.sendFile === false ? [] : [sendFileBuiltin],
-    ...botConfig.builtins?.react === false ? [] : [reactBuiltin]
+    ...botConfig.builtins?.react === false ? [] : [reactBuiltin],
+    ...botConfig.history?.search ? [searchHistoryBuiltin(botConfig.history.search)] : []
   ];
   const allBotTools = [...builtins, ...botTools];
   const allTools = { ...tools, ...buildBotToolSet(allBotTools) };
@@ -331,54 +332,92 @@ function startTelegramBot(options) {
         }
       });
     }
+    const runTurn = async (ctx, botCtx, userMessage, userText) => {
+      if (botConfig.history?.load) {
+        try {
+          botCtx.agent.messages = await botConfig.history.load(botCtx);
+        } catch (err) {
+          console.error("[nitro-bot] history.load error:", err instanceof Error ? err.stack : err);
+        }
+      }
+      for (const fn of pre) {
+        if (await fn(botCtx) === false) return;
+      }
+      if (subagents.length > 0) {
+        const guide = delegationGuide(subagents);
+        botCtx.agent.systemPrompt = botCtx.agent.systemPrompt ? `${botCtx.agent.systemPrompt}
+
+${guide}` : guide;
+      }
+      const messages = [...botCtx.agent.messages, userMessage];
+      const renderer = new TelegramRenderer(ctx, { draftStreaming });
+      await botContextStorage.run(
+        botCtx,
+        () => renderer.render(
+          createElement(AgentReply, {
+            messages,
+            system: botCtx.agent.systemPrompt,
+            tools: coordinatorTools,
+            hiddenTools,
+            model: chatConfig.model,
+            maxSteps: chatConfig.maxSteps,
+            guard: botConfig.guard,
+            onFinish: async (result) => {
+              botCtx.agent.result = result;
+              if (botConfig.history?.save) {
+                try {
+                  await botConfig.history.save(botCtx, { user: userText, assistant: result.text });
+                } catch (err) {
+                  console.error("[nitro-bot] history.save error:", err instanceof Error ? err.stack : err);
+                }
+              }
+              for (const fn of post) {
+                try {
+                  await fn(botCtx);
+                } catch (err) {
+                  console.error("[nitro-bot] post-middleware error:", err);
+                }
+              }
+            }
+          })
+        )
+      );
+    };
     bot.on("message:text", async (ctx) => {
       try {
         const botCtx = buildBotContext(ctx, botConfig);
         if (!botCtx) return;
         if (botCtx.message.text.startsWith("/")) return;
-        for (const fn of pre) {
-          const result = await fn(botCtx);
-          if (result === false) return;
-        }
-        if (subagents.length > 0) {
-          const guide = delegationGuide(subagents);
-          botCtx.agent.systemPrompt = botCtx.agent.systemPrompt ? `${botCtx.agent.systemPrompt}
-
-${guide}` : guide;
-        }
-        const messages = [...botCtx.agent.messages];
-        const last = messages[messages.length - 1];
-        if (!last || last.role !== "user" || last.content !== botCtx.message.text) {
-          messages.push({ role: "user", content: botCtx.message.text });
-        }
-        const renderer = new TelegramRenderer(ctx, { draftStreaming });
-        await botContextStorage.run(
-          botCtx,
-          () => renderer.render(
-            createElement(AgentReply, {
-              messages,
-              system: botCtx.agent.systemPrompt,
-              tools: coordinatorTools,
-              hiddenTools,
-              model: chatConfig.model,
-              maxSteps: chatConfig.maxSteps,
-              guard: botConfig.guard,
-              onFinish: async (result) => {
-                botCtx.agent.result = result;
-                for (const fn of post) {
-                  try {
-                    await fn(botCtx);
-                  } catch (err) {
-                    console.error("[nitro-bot] post-middleware error:", err);
-                  }
-                }
-              }
-            })
-          )
-        );
+        await runTurn(ctx, botCtx, { role: "user", content: botCtx.message.text }, botCtx.message.text);
       } catch (err) {
         console.error("[nitro-bot] message handler error:", err instanceof Error ? err.stack : err);
         await ctx.reply("\u26A0\uFE0F Something went wrong handling your message.").catch(() => {
+        });
+      }
+    });
+    bot.on(["message:document", "message:photo"], async (ctx) => {
+      try {
+        const botCtx = buildBotContext(ctx, botConfig);
+        if (!botCtx) return;
+        const attachment = await downloadAttachment(ctx, bot.token);
+        if (!attachment) return;
+        botCtx.message.attachment = attachment;
+        const caption = (ctx.message?.caption ?? "").trim();
+        const userMessage = {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: caption || `(The user sent a ${attachment.kind}: ${attachment.filename}. Decide what to do with it.)`
+            },
+            { type: "file", data: attachment.bytes, mediaType: attachment.mediaType, filename: attachment.filename }
+          ]
+        };
+        const label = `[${attachment.kind} ${attachment.filename}]`;
+        await runTurn(ctx, botCtx, userMessage, caption ? `${label} ${caption}` : label);
+      } catch (err) {
+        console.error("[nitro-bot] attachment handler error:", err instanceof Error ? err.stack : err);
+        await ctx.reply("\u26A0\uFE0F Something went wrong handling your file.").catch(() => {
         });
       }
     });
@@ -473,7 +512,7 @@ ${guide}` : guide;
 }
 function buildBotContext(ctx, config) {
   const msg = ctx.message;
-  if (!msg?.text || !ctx.chat || !ctx.from) return null;
+  if (!msg || !ctx.chat || !ctx.from) return null;
   const chatType = ctx.chat.type;
   const fallbackName = ctx.me?.first_name ?? "bot";
   const reply = {
@@ -502,7 +541,7 @@ function buildBotContext(ctx, config) {
   return {
     bot: { name: config.name ?? fallbackName, username: ctx.me?.username },
     message: {
-      text: msg.text,
+      text: msg.text ?? msg.caption ?? "",
       id: msg.message_id,
       replyToId: replyTo?.message_id,
       replyToText: replyTo?.text ?? replyTo?.caption,
@@ -527,6 +566,32 @@ function buildBotContext(ctx, config) {
     reply,
     context: {}
   };
+}
+async function downloadAttachment(ctx, token) {
+  const doc = ctx.message?.document;
+  const photo = ctx.message?.photo?.at(-1);
+  let fileId;
+  let mediaType;
+  let filename;
+  let kind;
+  if (doc) {
+    fileId = doc.file_id;
+    mediaType = doc.mime_type ?? "application/octet-stream";
+    filename = doc.file_name ?? "document";
+    kind = "document";
+  } else if (photo) {
+    fileId = photo.file_id;
+    mediaType = "image/jpeg";
+    filename = "photo.jpg";
+    kind = "photo";
+  } else {
+    return null;
+  }
+  const file = await ctx.api.getFile(fileId);
+  if (!file.file_path) return null;
+  const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  if (!res.ok) throw new Error(`Telegram file download failed: ${res.status} ${res.statusText}`);
+  return { bytes: Buffer.from(await res.arrayBuffer()), mediaType, filename, kind };
 }
 
 export { AgentReply, botContextStorage, getBotContext, registerBot, startTelegramBot };

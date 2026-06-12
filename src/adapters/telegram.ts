@@ -1,6 +1,6 @@
 import type { Bot } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import type { BotContext } from "../types";
+import type { BotContext, BotHistory } from "../types";
 
 /** Input handed to an `OutputGuard.check` for one not-yet-sent slice of the assistant's reply. */
 export type OutputGuardInput = {
@@ -95,6 +95,12 @@ export type TelegramBotConfig = {
    * replies while leaving private (admin) chats untouched.
    */
   guard?: OutputGuard;
+  /**
+   * Server-owned conversation memory. `history.load` seeds the agent with prior turns before each
+   * message; `history.save` persists the turn after the reply; `history.search` (optional) backs a
+   * built-in `search_history` tool. Without it the bot is stateless (each message starts fresh).
+   */
+  history?: BotHistory;
 };
 
 /** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */

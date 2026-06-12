@@ -33,6 +33,43 @@ declare module "h3" {
  */
 export interface NitroBotContext extends Record<string, unknown> {}
 
+/**
+ * A file the user sent with their message, already downloaded from Telegram. Set on
+ * `ctx.message.attachment` for `message:document` / `message:photo` updates. The same bytes are also
+ * handed to the model as a multimodal content part, so the agent can *see* the file and decide which
+ * tool to call; a tool's `execute` reads `ctx.message.attachment.bytes` to do the structured work.
+ */
+export type BotAttachment = {
+  /** Raw file bytes downloaded from Telegram. */
+  bytes: Buffer;
+  /** MIME type, e.g. `application/pdf` or `image/jpeg`. */
+  mediaType: string;
+  /** Original filename (documents) or a synthesized one (photos, e.g. `photo.jpg`). */
+  filename: string;
+  /** Which Telegram message kind this came from. */
+  kind: "document" | "photo";
+};
+
+/** A stored prior message, returned by {@link BotHistory.search} and surfaced through the `search_history` tool. */
+export type HistoryMessage = { role: "user" | "assistant"; content: string; at?: string };
+
+/**
+ * Server-owned conversation memory for a Telegram bot. nitro-bot calls `load` before each turn to seed
+ * the agent, and `save` after the reply completes; `search` (when provided) backs a built-in
+ * `search_history` tool the agent can call to look further back than the loaded window.
+ */
+export type BotHistory<C extends Record<string, unknown> = NitroBotContext> = {
+  /** Prior turns for this thread (oldest-first) to prepend before the current message. */
+  load?: (ctx: BotContext<C>) => Promise<ModelMessage[]> | ModelMessage[];
+  /** Persist one completed turn: the user's message text and the assistant's reply. */
+  save?: (ctx: BotContext<C>, turn: { user: string; assistant: string }) => Promise<void> | void;
+  /** Search prior messages (backs the `search_history` tool). `limit` is always provided (defaulted). */
+  search?: (
+    args: { query?: string; limit: number },
+    ctx: BotContext<C>,
+  ) => Promise<HistoryMessage[]> | HistoryMessage[];
+};
+
 /** Chat-platform side effects a bot-local tool can trigger (sending files/photos to the thread). */
 export type ChatReply = {
   sendDocument: (data: Uint8Array | Buffer, filename: string, caption?: string) => Promise<void>;
@@ -60,6 +97,8 @@ export type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
     replyToFromName?: string;
     /** True when this message replies directly to one of the bot's own messages. */
     repliesToBot?: boolean;
+    /** Set for `message:document` / `message:photo` updates — the downloaded file (also shown to the model). */
+    attachment?: BotAttachment;
   };
   user: {
     id: string;

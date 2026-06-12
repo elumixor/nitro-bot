@@ -187,6 +187,20 @@ const reactBuiltin = botTool({
     return `Reacted with ${emoji ?? "\u{1F44D}"}.`;
   }
 });
+function searchHistoryBuiltin(search) {
+  return botTool({
+    name: "search_history",
+    description: "Search earlier messages in THIS conversation for context beyond the few most recent turns. Pass a query of keywords to filter (omit to get the most recent messages). Use this to recall what the user said or what you did before, rather than guessing.",
+    input: {
+      query: z.string().nullable().describe("Keywords to match against message text, or null for the most recent."),
+      limit: z.number().int().min(1).max(100).nullable().describe("Max messages to return (default 20).")
+    },
+    execute: async ({ query, limit }, ctx) => {
+      const hits = await search({ query: query ?? void 0, limit: limit ?? 20 }, ctx);
+      return hits.length ? hits : "No earlier messages matched.";
+    }
+  });
+}
 
 function buildToolSet(routes, invoke) {
   const entries = routes.map((route) => {
@@ -490,4 +504,4 @@ async function persist(session, resolved, user, assistant, event) {
   }
 }
 
-export { botTool as a, botContextStorage as b, buildBotToolSet as c, buildToolSet as d, createChatHandler as e, createSessionChatHandler as f, defaultInvoke as g, getBot as h, getBotContext as i, isBotToolDefinition as j, registerBot as k, runAgent as l, runAgentEventStream as m, runAgentStream as n, reactBuiltin as r, sendFileBuiltin as s };
+export { botTool as a, botContextStorage as b, buildBotToolSet as c, buildToolSet as d, createChatHandler as e, createSessionChatHandler as f, defaultInvoke as g, getBot as h, getBotContext as i, isBotToolDefinition as j, registerBot as k, runAgent as l, runAgentEventStream as m, runAgentStream as n, sendFileBuiltin as o, reactBuiltin as r, searchHistoryBuiltin as s };

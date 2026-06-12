@@ -38,6 +38,47 @@ declare module "h3" {
  */
 interface NitroBotContext extends Record<string, unknown> {
 }
+/**
+ * A file the user sent with their message, already downloaded from Telegram. Set on
+ * `ctx.message.attachment` for `message:document` / `message:photo` updates. The same bytes are also
+ * handed to the model as a multimodal content part, so the agent can *see* the file and decide which
+ * tool to call; a tool's `execute` reads `ctx.message.attachment.bytes` to do the structured work.
+ */
+type BotAttachment = {
+    /** Raw file bytes downloaded from Telegram. */
+    bytes: Buffer;
+    /** MIME type, e.g. `application/pdf` or `image/jpeg`. */
+    mediaType: string;
+    /** Original filename (documents) or a synthesized one (photos, e.g. `photo.jpg`). */
+    filename: string;
+    /** Which Telegram message kind this came from. */
+    kind: "document" | "photo";
+};
+/** A stored prior message, returned by {@link BotHistory.search} and surfaced through the `search_history` tool. */
+type HistoryMessage = {
+    role: "user" | "assistant";
+    content: string;
+    at?: string;
+};
+/**
+ * Server-owned conversation memory for a Telegram bot. nitro-bot calls `load` before each turn to seed
+ * the agent, and `save` after the reply completes; `search` (when provided) backs a built-in
+ * `search_history` tool the agent can call to look further back than the loaded window.
+ */
+type BotHistory<C extends Record<string, unknown> = NitroBotContext> = {
+    /** Prior turns for this thread (oldest-first) to prepend before the current message. */
+    load?: (ctx: BotContext<C>) => Promise<ModelMessage[]> | ModelMessage[];
+    /** Persist one completed turn: the user's message text and the assistant's reply. */
+    save?: (ctx: BotContext<C>, turn: {
+        user: string;
+        assistant: string;
+    }) => Promise<void> | void;
+    /** Search prior messages (backs the `search_history` tool). `limit` is always provided (defaulted). */
+    search?: (args: {
+        query?: string;
+        limit: number;
+    }, ctx: BotContext<C>) => Promise<HistoryMessage[]> | HistoryMessage[];
+};
 /** Chat-platform side effects a bot-local tool can trigger (sending files/photos to the thread). */
 type ChatReply = {
     sendDocument: (data: Uint8Array | Buffer, filename: string, caption?: string) => Promise<void>;
@@ -67,6 +108,8 @@ type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
         replyToFromName?: string;
         /** True when this message replies directly to one of the bot's own messages. */
         repliesToBot?: boolean;
+        /** Set for `message:document` / `message:photo` updates — the downloaded file (also shown to the model). */
+        attachment?: BotAttachment;
     };
     user: {
         id: string;
@@ -212,6 +255,12 @@ type TelegramBotConfig = {
      * replies while leaving private (admin) chats untouched.
      */
     guard?: OutputGuard;
+    /**
+     * Server-owned conversation memory. `history.load` seeds the agent with prior turns before each
+     * message; `history.save` persists the turn after the reply; `history.search` (optional) backs a
+     * built-in `search_history` tool. Without it the bot is stateless (each message starts fresh).
+     */
+    history?: BotHistory;
 };
 /** Identity helper that types the default export of `src/bots/telegram/bot.ts`. */
 declare function defineTelegramBot(config: TelegramBotConfig): TelegramBotConfig;
@@ -553,5 +602,5 @@ declare function defineSubagent(def: {
 }): SubagentDefinition;
 declare function isSubagentDefinition(value: unknown): value is SubagentDefinition;
 
-export { resolveChatConfig as $, botPost as D, botPre as E, botTool as F, buildBotToolSet as G, buildToolSet as J, createChatHandler as K, createSessionChatHandler as L, defaultInvoke as M, defineChatSession as P, defineSubagent as Q, defineTelegramBot as U, getBot as V, getBotContext as W, isBotToolDefinition as X, isSubagentDefinition as Y, isToolDefinition as Z, registerBot as _, runAgent as a0, runAgentEventStream as a1, runAgentStream as a2, tool as a3, botCommand as y, botContextStorage as z };
-export type { AgentEvent as A, BotCommandDef as B, ChatConfig as C, HttpMethod as H, InvokeFn as I, NitroBotContext as N, OutputGuard as O, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotContext as c, BotEntry as d, BotPostFn as e, BotPreFn as f, BotToolDefinition as g, ChatOptions as h, ChatReply as i, ChatResponse as j, ChatSessionDef as k, ChatSessionResolved as l, CommandContext as m, OutputGuardInput as n, ResolvedChatConfig as o, RunAgentOptions as p, RunAgentResult as q, StreamAgentOptions as r, SubagentDefinition as s, TelegramBotInfo as t, TelegramWebhookConfig as u, ToolDefinition as v, ToolInput as w, ToolRoute as x };
+export { isSubagentDefinition as $, botCommand as E, botContextStorage as F, botPost as G, botPre as J, botTool as K, buildBotToolSet as L, buildToolSet as M, createChatHandler as P, createSessionChatHandler as Q, defaultInvoke as U, defineChatSession as V, defineSubagent as W, defineTelegramBot as X, getBot as Y, getBotContext as Z, isBotToolDefinition as _, isToolDefinition as a0, registerBot as a1, resolveChatConfig as a2, runAgent as a3, runAgentEventStream as a4, runAgentStream as a5, tool as a6 };
+export type { AgentEvent as A, BotAttachment as B, ChatConfig as C, ToolRoute as D, HistoryMessage as H, InvokeFn as I, NitroBotContext as N, OutputGuard as O, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotCommandDef as c, BotContext as d, BotEntry as e, BotHistory as f, BotPostFn as g, BotPreFn as h, BotToolDefinition as i, ChatOptions as j, ChatReply as k, ChatResponse as l, ChatSessionDef as m, ChatSessionResolved as n, CommandContext as o, HttpMethod as p, OutputGuardInput as q, ResolvedChatConfig as r, RunAgentOptions as s, RunAgentResult as t, StreamAgentOptions as u, SubagentDefinition as v, TelegramBotInfo as w, TelegramWebhookConfig as x, ToolDefinition as y, ToolInput as z };

@@ -1,5 +1,5 @@
-import { m as runAgentEventStream, d as buildToolSet, g as defaultInvoke } from './shared/nitro-bot.BLiAuwxU.mjs';
-export { a as botTool, c as buildBotToolSet, e as createChatHandler, f as createSessionChatHandler, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, n as runAgentStream, s as sendFileBuiltin } from './shared/nitro-bot.BLiAuwxU.mjs';
+import { m as runAgentEventStream, d as buildToolSet, g as defaultInvoke } from './shared/nitro-bot.DGLPJw5h.mjs';
+export { a as botTool, c as buildBotToolSet, e as createChatHandler, f as createSessionChatHandler, h as getBot, i as getBotContext, j as isBotToolDefinition, k as registerBot, l as runAgent, n as runAgentStream, o as sendFileBuiltin } from './shared/nitro-bot.DGLPJw5h.mjs';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
 import { Project, Node, SyntaxKind } from 'ts-morph';
