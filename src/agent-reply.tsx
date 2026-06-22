@@ -203,9 +203,10 @@ export function AgentReply({
               if (part.toolName && !hidden.has(part.toolName)) {
                 const toolName = part.toolName;
                 const lineIndex = toolLines.length;
-                // Show the bare name immediately; if a labeler is configured, swap in a friendly phrase
-                // ("Looking up Yehor") once the cheap describe call returns — never block the stream on it.
-                toolLines.push(`🔧 \`${toolName}\``);
+                // With a labeler, never flash the raw tool name (e.g. `delegate_to_time`): show a neutral
+                // placeholder and swap in the friendly phrase ("Recording time for Yehor") once the cheap
+                // describe call returns. Without a labeler, the bare name is the best we have.
+                toolLines.push(describeTool ? "🔧 …" : `🔧 \`${toolName}\``);
                 if (describeTool) {
                   const description = (tools as Record<string, { description?: string }>)[toolName]?.description;
                   const input = part.input ?? part.args;

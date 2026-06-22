@@ -148,7 +148,7 @@ function AgentReply({
               if (part.toolName && !hidden.has(part.toolName)) {
                 const toolName = part.toolName;
                 const lineIndex = toolLines.length;
-                toolLines.push(`\u{1F527} \`${toolName}\``);
+                toolLines.push(describeTool ? "\u{1F527} \u2026" : `\u{1F527} \`${toolName}\``);
                 if (describeTool) {
                   const description = tools[toolName]?.description;
                   const input = part.input ?? part.args;
