@@ -12,6 +12,7 @@ import type { BotCommandDef, CommandContext } from "./command";
 import { registerBot } from "./registry";
 import type { SubagentDefinition } from "./subagent";
 import { buildCoordinatorTools, delegationGuide } from "./supervisor";
+import { makeToolLabeler } from "./tool-label";
 import type { BotAttachment, BotContext, BotPostFn, BotPreFn, ChatReply } from "./types";
 
 type ExecutableTool = { execute?: (input: unknown, options: unknown) => Promise<unknown> };
@@ -34,7 +35,7 @@ export type StartTelegramBotOptions = {
   subagents?: SubagentDefinition[];
   /** Registry key — the bot folder name (e.g. "telegram"). Used by getBot() and the webhook route. */
   name?: string;
-  chatConfig: { model: LanguageModel; maxSteps: number };
+  chatConfig: { model: LanguageModel; maxSteps: number; labelModel?: LanguageModel };
 };
 
 export function startTelegramBot(options: StartTelegramBotOptions) {
@@ -65,6 +66,10 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
   ];
   const allBotTools = [...builtins, ...botTools];
   const allTools: ToolSet = { ...tools, ...buildBotToolSet(allBotTools) };
+
+  // When a label model is configured, each tool call's `🔧` trail line is rewritten to a short
+  // human-readable phrase ("Looking up Yehor") instead of the raw tool name.
+  const describeTool = chatConfig.labelModel ? makeToolLabeler(chatConfig.labelModel) : undefined;
 
   // Tools flagged `hidden` (e.g. `react`) still run, but their call isn't narrated in the `🔧 <name>` trail.
   const hiddenTools = [
@@ -139,6 +144,8 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
     // agent over [history, userMessage] → on finish, persist the turn and run post-middleware. `userText`
     // is the plain-text form stored in history (an attachment's bytes can't be persisted as a message).
     const runTurn = async (ctx: Context, botCtx: BotContext, userMessage: ModelMessage, userText: string) => {
+      // So subagent (delegate) tool calls can label their nested `↳ 🔧` trail lines too (see supervisor).
+      botCtx.agent.describeTool = describeTool;
       if (botConfig.history?.load) {
         try {
           botCtx.agent.messages = await botConfig.history.load(botCtx);
@@ -170,6 +177,7 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
             system: botCtx.agent.systemPrompt,
             tools: coordinatorTools,
             hiddenTools,
+            describeTool,
             model: chatConfig.model,
             maxSteps: chatConfig.maxSteps,
             guard: botConfig.guard,

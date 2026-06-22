@@ -1,10 +1,24 @@
 import { Bot } from 'grammy';
 import { UserFromGetMe } from 'grammy/types';
-import { ModelMessage, ToolSet, LanguageModel } from 'ai';
+import { LanguageModel, ModelMessage, ToolSet } from 'ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
 import * as h3 from 'h3';
 import { EventHandler, H3Event } from 'h3';
+
+/** A tool call to be described for the live `🔧` trail. */
+type ToolCallInfo = {
+    name: string;
+    description?: string;
+    input: unknown;
+};
+/** Turns a tool call into a short, human-readable status line (e.g. "Looking up Yehor"). */
+type ToolLabeler = (call: ToolCallInfo) => Promise<string>;
+/**
+ * Build a labeler backed by a (cheap) model. Each call is one short `generateText`; on any failure the
+ * caller falls back to the bare tool name, so labeling never blocks or breaks a reply.
+ */
+declare function makeToolLabeler(model: LanguageModel): ToolLabeler;
 
 declare module "h3" {
     interface H3EventContext {
@@ -136,6 +150,8 @@ type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
         };
         /** Set by the renderer; subagent tool calls report a `↳ 🔧 name` trail line through it. Internal. */
         reportToolLine?: (line: string) => void;
+        /** Set by the bot when `labelModel` is configured; turns a tool call into a short trail label. Internal. */
+        describeTool?: ToolLabeler;
     };
     /** Send files/photos/text to the current thread. Available inside bot-local tools and middleware. */
     reply: ChatReply;
@@ -400,6 +416,12 @@ type ChatConfig = {
     source?: RequestSource;
     field?: string;
     model?: LanguageModel;
+    /**
+     * Optional cheap model used only to turn each tool call into a short human-readable line in the live
+     * `🔧` trail (e.g. "Looking up Yehor" instead of `🔧 find_person`). When unset, the bare tool name is
+     * shown. Pass a gateway model id string (e.g. "google/gemini-3.5-flash").
+     */
+    labelModel?: LanguageModel;
     maxSteps?: number;
     /** System prompt for the HTTP `/chat` endpoint. (Bots set their own via pre-middleware.) */
     systemPrompt?: string;
@@ -415,7 +437,7 @@ type ChatConfig = {
     /** Stream the `/chat` reply as Server-Sent Events (`data: {delta}` / `{done}` / `{error}`). */
     stream?: boolean;
 };
-type ResolvedChatConfig = Required<Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir" | "stream">> & Pick<ChatConfig, "systemPrompt" | "sessionFile">;
+type ResolvedChatConfig = Required<Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir" | "stream">> & Pick<ChatConfig, "systemPrompt" | "sessionFile" | "labelModel">;
 declare function resolveChatConfig(config: ChatConfig | undefined): ResolvedChatConfig;
 
 declare const TOOL_BRAND: unique symbol;
@@ -602,5 +624,5 @@ declare function defineSubagent(def: {
 }): SubagentDefinition;
 declare function isSubagentDefinition(value: unknown): value is SubagentDefinition;
 
-export { isSubagentDefinition as $, botCommand as E, botContextStorage as F, botPost as G, botPre as J, botTool as K, buildBotToolSet as L, buildToolSet as M, createChatHandler as P, createSessionChatHandler as Q, defaultInvoke as U, defineChatSession as V, defineSubagent as W, defineTelegramBot as X, getBot as Y, getBotContext as Z, isBotToolDefinition as _, isToolDefinition as a0, registerBot as a1, resolveChatConfig as a2, runAgent as a3, runAgentEventStream as a4, runAgentStream as a5, tool as a6 };
-export type { AgentEvent as A, BotAttachment as B, ChatConfig as C, ToolRoute as D, HistoryMessage as H, InvokeFn as I, NitroBotContext as N, OutputGuard as O, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotCommandDef as c, BotContext as d, BotEntry as e, BotHistory as f, BotPostFn as g, BotPreFn as h, BotToolDefinition as i, ChatOptions as j, ChatReply as k, ChatResponse as l, ChatSessionDef as m, ChatSessionResolved as n, CommandContext as o, HttpMethod as p, OutputGuardInput as q, ResolvedChatConfig as r, RunAgentOptions as s, RunAgentResult as t, StreamAgentOptions as u, SubagentDefinition as v, TelegramBotInfo as w, TelegramWebhookConfig as x, ToolDefinition as y, ToolInput as z };
+export { getBotContext as $, botCommand as G, botContextStorage as J, botPost as K, botPre as L, botTool as M, buildBotToolSet as P, buildToolSet as Q, createChatHandler as U, createSessionChatHandler as V, defaultInvoke as W, defineChatSession as X, defineSubagent as Y, defineTelegramBot as Z, getBot as _, isBotToolDefinition as a0, isSubagentDefinition as a1, isToolDefinition as a2, makeToolLabeler as a3, registerBot as a4, resolveChatConfig as a5, runAgent as a6, runAgentEventStream as a7, runAgentStream as a8, tool as a9 };
+export type { AgentEvent as A, BotAttachment as B, ChatConfig as C, ToolInput as D, ToolLabeler as E, ToolRoute as F, HistoryMessage as H, InvokeFn as I, NitroBotContext as N, OutputGuard as O, RequestSource as R, SessionChatOptions as S, TelegramBotConfig as T, AgentEventStreamOptions as a, AnyBotTool as b, BotCommandDef as c, BotContext as d, BotEntry as e, BotHistory as f, BotPostFn as g, BotPreFn as h, BotToolDefinition as i, ChatOptions as j, ChatReply as k, ChatResponse as l, ChatSessionDef as m, ChatSessionResolved as n, CommandContext as o, HttpMethod as p, OutputGuardInput as q, ResolvedChatConfig as r, RunAgentOptions as s, RunAgentResult as t, StreamAgentOptions as u, SubagentDefinition as v, TelegramBotInfo as w, TelegramWebhookConfig as x, ToolCallInfo as y, ToolDefinition as z };

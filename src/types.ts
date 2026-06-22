@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import type { ToolLabeler } from "./tool-label";
 
 declare module "h3" {
   interface H3EventContext {
@@ -122,6 +123,8 @@ export type BotContext<C extends Record<string, unknown> = NitroBotContext> = {
     result?: { text: string; steps: number };
     /** Set by the renderer; subagent tool calls report a `↳ 🔧 name` trail line through it. Internal. */
     reportToolLine?: (line: string) => void;
+    /** Set by the bot when `labelModel` is configured; turns a tool call into a short trail label. Internal. */
+    describeTool?: ToolLabeler;
   };
   /** Send files/photos/text to the current thread. Available inside bot-local tools and middleware. */
   reply: ChatReply;

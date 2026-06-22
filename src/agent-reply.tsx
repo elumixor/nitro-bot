@@ -3,6 +3,7 @@ import { type LanguageModel, type ModelMessage, stepCountIs, streamText, type To
 import { useEffect, useState } from "react";
 import type { OutputGuard } from "./adapters/telegram";
 import { getBotContext } from "./als";
+import type { ToolLabeler } from "./tool-label";
 
 /**
  * Pull a human-readable message out of whatever the model/provider throws. AI SDK stream `error` parts
@@ -35,6 +36,8 @@ export type AgentReplyProps = {
   tools: ToolSet;
   /** Tool names whose calls are not shown in the `🔧 <name>` trail (e.g. `react`). */
   hiddenTools?: readonly string[];
+  /** When set, each tool call's trail line is replaced with a short human-readable label (async). */
+  describeTool?: ToolLabeler;
   model: LanguageModel;
   maxSteps?: number;
   /** Called when the stream finishes — passes the final text + step count back so callers can run post-middleware. */
@@ -79,6 +82,7 @@ export function AgentReply({
   system,
   tools,
   hiddenTools,
+  describeTool,
   model,
   maxSteps,
   onFinish,
@@ -86,6 +90,9 @@ export function AgentReply({
 }: AgentReplyProps) {
   const [body, setBody] = useState("…");
   const [errored, setErrored] = useState<string | null>(null);
+  // When the turn ends with no text (e.g. the bot only reacted), we render nothing so the renderer
+  // deletes the in-progress draft instead of leaving a bare "…" or a dangling tool trail.
+  const [suppressed, setSuppressed] = useState(false);
   const finish = useFinishRender();
 
   useEffect(() => {
@@ -95,6 +102,7 @@ export function AgentReply({
       let reasoning = "";
       const toolLines: string[] = [];
       let steps = 0;
+      let failed = false;
 
       const ctx = getBotContext();
       // When a guard is active for this chat we never render the raw stream: only text the guard has
@@ -167,7 +175,14 @@ export function AgentReply({
 
         for await (const raw of result.fullStream) {
           if (cancelled) return;
-          const part = raw as { type: string; text?: string; delta?: string; toolName?: string };
+          const part = raw as {
+            type: string;
+            text?: string;
+            delta?: string;
+            toolName?: string;
+            input?: unknown;
+            args?: unknown;
+          };
           switch (part.type) {
             case "text-delta": {
               const delta = part.text ?? part.delta ?? "";
@@ -185,7 +200,24 @@ export function AgentReply({
               if (!gating) render();
               break;
             case "tool-call":
-              if (part.toolName && !hidden.has(part.toolName)) toolLines.push(`🔧 \`${part.toolName}\``);
+              if (part.toolName && !hidden.has(part.toolName)) {
+                const toolName = part.toolName;
+                const lineIndex = toolLines.length;
+                // Show the bare name immediately; if a labeler is configured, swap in a friendly phrase
+                // ("Looking up Yehor") once the cheap describe call returns — never block the stream on it.
+                toolLines.push(`🔧 \`${toolName}\``);
+                if (describeTool) {
+                  const description = (tools as Record<string, { description?: string }>)[toolName]?.description;
+                  const input = part.input ?? part.args;
+                  void describeTool({ name: toolName, description, input })
+                    .then((label) => {
+                      if (cancelled) return;
+                      toolLines[lineIndex] = `🔧 ${label}`;
+                      render();
+                    })
+                    .catch(() => {});
+                }
+              }
               render();
               break;
             case "error":
@@ -197,13 +229,20 @@ export function AgentReply({
         if (gating) await scheduleFlush(true); // drain the buffer before we report the final text
         steps = (await result.steps).length;
       } catch (err) {
-        if (!cancelled) setErrored(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          failed = true;
+          setErrored(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         if (!cancelled) {
+          const finalText = gating ? released : answer;
+          // No text to send (the turn was a pure tool/react action) → render nothing so no empty "…"
+          // message is left behind. The tool trail was useful live; it's not worth persisting on its own.
+          if (!failed && !finalText.trim()) setSuppressed(true);
           if (onFinish) {
             try {
               // Report the cleared text when gating so history/logs never store the raw (unscrubbed) reply.
-              await onFinish({ text: gating ? released : answer, steps });
+              await onFinish({ text: finalText, steps });
             } catch (err) {
               console.error("[nitro-bot] onFinish error:", err);
             }
@@ -215,9 +254,11 @@ export function AgentReply({
     return () => {
       cancelled = true;
     };
-  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish, guard]);
+  }, [messages, system, tools, hiddenTools, describeTool, model, maxSteps, finish, onFinish, guard]);
 
   if (errored) return <Message>⚠️ {errored}</Message>;
+  // Render nothing on an empty turn so the renderer deletes the draft (no stray "…" message).
+  if (suppressed) return null;
   return <Message>{body}</Message>;
 }
 

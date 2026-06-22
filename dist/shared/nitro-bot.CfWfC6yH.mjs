@@ -504,4 +504,26 @@ async function persist(session, resolved, user, assistant, event) {
   }
 }
 
-export { botTool as a, botContextStorage as b, buildBotToolSet as c, buildToolSet as d, createChatHandler as e, createSessionChatHandler as f, defaultInvoke as g, getBot as h, getBotContext as i, isBotToolDefinition as j, registerBot as k, runAgent as l, runAgentEventStream as m, runAgentStream as n, sendFileBuiltin as o, reactBuiltin as r, searchHistoryBuiltin as s };
+const SYSTEM = 'You turn a single tool call into a 2\u20135 word status line shown to a non-technical chat user while the assistant works. Describe what is happening right now in present continuous, e.g. "Looking up Yehor", "Recording 8.5h", "Searching the web", "Saving the report". Prefer real names and values from the arguments over ids or jargon; never echo the raw tool name. Reply with the phrase only \u2014 no quotes, no trailing punctuation.';
+function makeToolLabeler(model) {
+  return async ({ name, description, input }) => {
+    let args = "";
+    try {
+      args = JSON.stringify(input);
+    } catch {
+      args = "";
+    }
+    if (args.length > 600) args = `${args.slice(0, 600)}\u2026`;
+    const { text } = await generateText({
+      model,
+      system: SYSTEM,
+      prompt: `Tool: ${name}
+Purpose: ${description ?? "(none given)"}
+Arguments: ${args || "(none)"}`
+    });
+    const label = text.trim().replace(/^["']+|["']+$/g, "").replace(/[.\s]+$/, "");
+    return label || name;
+  };
+}
+
+export { botTool as a, botContextStorage as b, buildBotToolSet as c, buildToolSet as d, createChatHandler as e, createSessionChatHandler as f, defaultInvoke as g, getBot as h, getBotContext as i, isBotToolDefinition as j, registerBot as k, runAgent as l, makeToolLabeler as m, runAgentEventStream as n, runAgentStream as o, sendFileBuiltin as p, reactBuiltin as r, searchHistoryBuiltin as s };

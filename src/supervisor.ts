@@ -84,10 +84,24 @@ function wrapTrail(toolset: ToolSet, hidden: Set<string>): ToolSet {
   const out: ToolSet = {};
   for (const [name, t] of Object.entries(toolset)) {
     const original = (t as { execute?: (input: unknown, options: unknown) => Promise<unknown> }).execute;
+    const description = (t as { description?: string }).description;
     out[name] = {
       ...(t as object),
       execute: async (input: unknown, options: unknown) => {
-        if (!hidden.has(name)) getBotContext()?.agent.reportToolLine?.(`↳ 🔧 \`${name}\``);
+        if (!hidden.has(name)) {
+          const ctx = getBotContext();
+          // Label the nested call too when a labeler is configured. Resolved before reporting so lines
+          // stay in call order; on any failure it falls back to the bare tool name.
+          let line = `↳ 🔧 \`${name}\``;
+          if (ctx?.agent.describeTool) {
+            try {
+              line = `↳ 🔧 ${await ctx.agent.describeTool({ name, description, input })}`;
+            } catch {
+              // keep the bare-name fallback
+            }
+          }
+          ctx?.agent.reportToolLine?.(line);
+        }
         return original ? await original(input, options) : undefined;
       },
     } as ToolSet[string];

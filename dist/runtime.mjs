@@ -1,5 +1,5 @@
-import { i as getBotContext, l as runAgent, o as sendFileBuiltin, r as reactBuiltin, s as searchHistoryBuiltin, c as buildBotToolSet, b as botContextStorage, k as registerBot } from './shared/nitro-bot.DGLPJw5h.mjs';
-export { f as createSessionChatHandler, h as getBot, m as runAgentEventStream, n as runAgentStream } from './shared/nitro-bot.DGLPJw5h.mjs';
+import { i as getBotContext, l as runAgent, p as sendFileBuiltin, r as reactBuiltin, s as searchHistoryBuiltin, c as buildBotToolSet, m as makeToolLabeler, b as botContextStorage, k as registerBot } from './shared/nitro-bot.CfWfC6yH.mjs';
+export { f as createSessionChatHandler, h as getBot, n as runAgentEventStream, o as runAgentStream } from './shared/nitro-bot.CfWfC6yH.mjs';
 import { jsxs, jsx } from 'react/jsx-runtime';
 import { useFinishRender, Message } from '@elumixor/react-message-renderer';
 import { streamText, stepCountIs, tool } from 'ai';
@@ -55,6 +55,7 @@ function AgentReply({
   system,
   tools,
   hiddenTools,
+  describeTool,
   model,
   maxSteps,
   onFinish,
@@ -62,6 +63,7 @@ function AgentReply({
 }) {
   const [body, setBody] = useState("\u2026");
   const [errored, setErrored] = useState(null);
+  const [suppressed, setSuppressed] = useState(false);
   const finish = useFinishRender();
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +72,7 @@ function AgentReply({
       let reasoning = "";
       const toolLines = [];
       let steps = 0;
+      let failed = false;
       const ctx = getBotContext();
       const gating = Boolean(guard && ctx && guard.active(ctx));
       let answer = "";
@@ -142,7 +145,21 @@ function AgentReply({
               if (!gating) render();
               break;
             case "tool-call":
-              if (part.toolName && !hidden.has(part.toolName)) toolLines.push(`\u{1F527} \`${part.toolName}\``);
+              if (part.toolName && !hidden.has(part.toolName)) {
+                const toolName = part.toolName;
+                const lineIndex = toolLines.length;
+                toolLines.push(`\u{1F527} \`${toolName}\``);
+                if (describeTool) {
+                  const description = tools[toolName]?.description;
+                  const input = part.input ?? part.args;
+                  void describeTool({ name: toolName, description, input }).then((label) => {
+                    if (cancelled) return;
+                    toolLines[lineIndex] = `\u{1F527} ${label}`;
+                    render();
+                  }).catch(() => {
+                  });
+                }
+              }
               render();
               break;
             case "error":
@@ -154,12 +171,17 @@ function AgentReply({
         if (gating) await scheduleFlush(true);
         steps = (await result.steps).length;
       } catch (err) {
-        if (!cancelled) setErrored(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          failed = true;
+          setErrored(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         if (!cancelled) {
+          const finalText = gating ? released : answer;
+          if (!failed && !finalText.trim()) setSuppressed(true);
           if (onFinish) {
             try {
-              await onFinish({ text: gating ? released : answer, steps });
+              await onFinish({ text: finalText, steps });
             } catch (err) {
               console.error("[nitro-bot] onFinish error:", err);
             }
@@ -171,11 +193,12 @@ function AgentReply({
     return () => {
       cancelled = true;
     };
-  }, [messages, system, tools, hiddenTools, model, maxSteps, finish, onFinish, guard]);
+  }, [messages, system, tools, hiddenTools, describeTool, model, maxSteps, finish, onFinish, guard]);
   if (errored) return /* @__PURE__ */ jsxs(Message, { children: [
     "\u26A0\uFE0F ",
     errored
   ] });
+  if (suppressed) return null;
   return /* @__PURE__ */ jsx(Message, { children: body });
 }
 function StaticReply({ text }) {
@@ -237,10 +260,21 @@ function wrapTrail(toolset, hidden) {
   const out = {};
   for (const [name, t] of Object.entries(toolset)) {
     const original = t.execute;
+    const description = t.description;
     out[name] = {
       ...t,
       execute: async (input, options) => {
-        if (!hidden.has(name)) getBotContext()?.agent.reportToolLine?.(`\u21B3 \u{1F527} \`${name}\``);
+        if (!hidden.has(name)) {
+          const ctx = getBotContext();
+          let line = `\u21B3 \u{1F527} \`${name}\``;
+          if (ctx?.agent.describeTool) {
+            try {
+              line = `\u21B3 \u{1F527} ${await ctx.agent.describeTool({ name, description, input })}`;
+            } catch {
+            }
+          }
+          ctx?.agent.reportToolLine?.(line);
+        }
         return original ? await original(input, options) : void 0;
       }
     };
@@ -282,6 +316,7 @@ function startTelegramBot(options) {
   ];
   const allBotTools = [...builtins, ...botTools];
   const allTools = { ...tools, ...buildBotToolSet(allBotTools) };
+  const describeTool = chatConfig.labelModel ? makeToolLabeler(chatConfig.labelModel) : void 0;
   const hiddenTools = [
     ...allBotTools.filter((t) => t.hidden).map((t) => t.name),
     ...toolRoutes.filter((r) => r.module.definition.hidden).map((r) => r.module.definition.name)
@@ -333,6 +368,7 @@ function startTelegramBot(options) {
       });
     }
     const runTurn = async (ctx, botCtx, userMessage, userText) => {
+      botCtx.agent.describeTool = describeTool;
       if (botConfig.history?.load) {
         try {
           botCtx.agent.messages = await botConfig.history.load(botCtx);
@@ -359,6 +395,7 @@ ${guide}` : guide;
             system: botCtx.agent.systemPrompt,
             tools: coordinatorTools,
             hiddenTools,
+            describeTool,
             model: chatConfig.model,
             maxSteps: chatConfig.maxSteps,
             guard: botConfig.guard,

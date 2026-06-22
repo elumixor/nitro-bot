@@ -1,5 +1,5 @@
-import { O as OutputGuard, T as TelegramBotConfig, h as BotPreFn, g as BotPostFn, b as AnyBotTool, D as ToolRoute, c as BotCommandDef, v as SubagentDefinition } from './shared/nitro-bot.CuJYTuty.js';
-export { A as AgentEvent, a as AgentEventStreamOptions, e as BotEntry, t as RunAgentResult, S as SessionChatOptions, u as StreamAgentOptions, F as botContextStorage, Q as createSessionChatHandler, Y as getBot, Z as getBotContext, a1 as registerBot, a4 as runAgentEventStream, a5 as runAgentStream } from './shared/nitro-bot.CuJYTuty.js';
+import { E as ToolLabeler, O as OutputGuard, T as TelegramBotConfig, h as BotPreFn, g as BotPostFn, b as AnyBotTool, F as ToolRoute, c as BotCommandDef, v as SubagentDefinition } from './shared/nitro-bot.CHKscddZ.js';
+export { A as AgentEvent, a as AgentEventStreamOptions, e as BotEntry, t as RunAgentResult, S as SessionChatOptions, u as StreamAgentOptions, J as botContextStorage, V as createSessionChatHandler, _ as getBot, $ as getBotContext, a4 as registerBot, a7 as runAgentEventStream, a8 as runAgentStream } from './shared/nitro-bot.CHKscddZ.js';
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import { ModelMessage, ToolSet, LanguageModel } from 'ai';
 import 'grammy';
@@ -15,6 +15,8 @@ type AgentReplyProps = {
     tools: ToolSet;
     /** Tool names whose calls are not shown in the `🔧 <name>` trail (e.g. `react`). */
     hiddenTools?: readonly string[];
+    /** When set, each tool call's trail line is replaced with a short human-readable label (async). */
+    describeTool?: ToolLabeler;
     model: LanguageModel;
     maxSteps?: number;
     /** Called when the stream finishes — passes the final text + step count back so callers can run post-middleware. */
@@ -25,7 +27,7 @@ type AgentReplyProps = {
     /** Streaming output guard. When active for this chat, completed chunks are scrubbed before being sent. */
     guard?: OutputGuard;
 };
-declare function AgentReply({ messages, system, tools, hiddenTools, model, maxSteps, onFinish, guard, }: AgentReplyProps): react_jsx_runtime.JSX.Element;
+declare function AgentReply({ messages, system, tools, hiddenTools, describeTool, model, maxSteps, onFinish, guard, }: AgentReplyProps): react_jsx_runtime.JSX.Element | null;
 
 type NitroApp = {
     hooks: {
@@ -50,6 +52,7 @@ type StartTelegramBotOptions = {
     chatConfig: {
         model: LanguageModel;
         maxSteps: number;
+        labelModel?: LanguageModel;
     };
 };
 declare function startTelegramBot(options: StartTelegramBotOptions): (nitroApp: NitroApp) => Promise<void>;

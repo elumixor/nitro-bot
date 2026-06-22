@@ -13,6 +13,12 @@ export type ChatConfig = {
   source?: RequestSource;
   field?: string;
   model?: LanguageModel;
+  /**
+   * Optional cheap model used only to turn each tool call into a short human-readable line in the live
+   * `🔧` trail (e.g. "Looking up Yehor" instead of `🔧 find_person`). When unset, the bare tool name is
+   * shown. Pass a gateway model id string (e.g. "google/gemini-3.5-flash").
+   */
+  labelModel?: LanguageModel;
   maxSteps?: number;
   /** System prompt for the HTTP `/chat` endpoint. (Bots set their own via pre-middleware.) */
   systemPrompt?: string;
@@ -32,7 +38,7 @@ export type ChatConfig = {
 export type ResolvedChatConfig = Required<
   Pick<ChatConfig, "endpoint" | "source" | "field" | "maxSteps" | "model" | "botsDir" | "stream">
 > &
-  Pick<ChatConfig, "systemPrompt" | "sessionFile">;
+  Pick<ChatConfig, "systemPrompt" | "sessionFile" | "labelModel">;
 
 export const DEFAULT_CONFIG: ResolvedChatConfig = {
   endpoint: "/chat",

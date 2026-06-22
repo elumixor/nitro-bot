@@ -42,6 +42,7 @@ export { createSessionChatHandler, type SessionChatOptions } from "./session-han
 export { type RunAgentSessionOptions, runAgentSession } from "./session-stream";
 export { defineSubagent, isSubagentDefinition, type SubagentDefinition } from "./subagent";
 export { isToolDefinition, type ToolDefinition, type ToolInput, tool } from "./tool";
+export { makeToolLabeler, type ToolCallInfo, type ToolLabeler } from "./tool-label";
 export {
   type BotAttachment,
   type BotContext,
