@@ -36,7 +36,6 @@ export {
 } from "./config";
 export { type DiscoveredRoute, discoverToolRoutes } from "./discover";
 export { default as nitroBotModule, type NitroBotModuleOptions } from "./nitro-module";
-export { getProviderTools, registerProviderTools } from "./provider-tools";
 export { type BotEntry, getBot, registerBot } from "./registry";
 export { type ChatSessionDef, type ChatSessionResolved, defineChatSession } from "./session";
 export { createSessionChatHandler, type SessionChatOptions } from "./session-handler";

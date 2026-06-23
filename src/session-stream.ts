@@ -2,7 +2,6 @@ import type { LanguageModel, ModelMessage } from "ai";
 import type { H3Event } from "h3";
 import { type AgentEvent, runAgentEventStream } from "./agent-stream";
 import { buildToolSet, defaultInvoke, type ToolRoute } from "./chat-handler";
-import { getProviderTools } from "./provider-tools";
 import type { ChatSessionDef } from "./session";
 
 export type RunAgentSessionOptions = {
@@ -46,7 +45,7 @@ export async function* runAgentSession(opts: RunAgentSessionOptions): AsyncGener
 
   const result = yield* runAgentEventStream({
     messages,
-    tools: { ...buildToolSet(toolRoutes, defaultInvoke), ...getProviderTools() },
+    tools: buildToolSet(toolRoutes, defaultInvoke),
     model,
     maxSteps,
     systemPrompt: resolved.systemPrompt,
