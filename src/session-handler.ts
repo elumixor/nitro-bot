@@ -3,6 +3,7 @@ import { createError, defineEventHandler, type H3Event, readBody, setResponseHea
 import { runAgentStream } from "./agent";
 import { botContextStorage } from "./als";
 import { buildToolSet, defaultInvoke, type ToolRoute } from "./chat-handler";
+import { getProviderTools } from "./provider-tools";
 import type { ChatSessionDef, ChatSessionResolved } from "./session";
 import type { BotContext, ChatReply } from "./types";
 
@@ -52,7 +53,7 @@ function buildSessionContext(message: string, resolved: ChatSessionResolved, mes
 export function createSessionChatHandler(options: SessionChatOptions) {
   const field = options.field ?? "message";
   const stream = options.stream ?? false;
-  const toolSet = buildToolSet(options.tools, defaultInvoke);
+  const baseToolSet = buildToolSet(options.tools, defaultInvoke);
 
   return defineEventHandler(async (event: H3Event) => {
     const body = ((await readBody(event)) ?? {}) as Record<string, unknown>;
@@ -68,6 +69,10 @@ export function createSessionChatHandler(options: SessionChatOptions) {
     if (!last || last.role !== "user" || last.content !== message) messages.push({ role: "user", content: message });
 
     const botCtx = buildSessionContext(message, resolved, messages);
+
+    // Provider-/gateway-executed tools (e.g. web search) are registered at startup; merge them in here so
+    // ordering vs. handler setup doesn't matter.
+    const toolSet = { ...baseToolSet, ...getProviderTools() };
 
     const run = (onDelta?: (delta: string) => void, onToolCall?: (name: string) => void) =>
       botContextStorage.run(botCtx, () =>

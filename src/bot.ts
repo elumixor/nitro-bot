@@ -9,6 +9,7 @@ import { type AnyBotTool, buildBotToolSet } from "./bot-tool";
 import { reactBuiltin, searchHistoryBuiltin, sendFileBuiltin } from "./builtins";
 import type { ToolRoute } from "./chat-handler";
 import type { BotCommandDef, CommandContext } from "./command";
+import { getProviderTools } from "./provider-tools";
 import { registerBot } from "./registry";
 import type { SubagentDefinition } from "./subagent";
 import { buildCoordinatorTools, delegationGuide } from "./supervisor";
@@ -175,7 +176,9 @@ export function startTelegramBot(options: StartTelegramBotOptions) {
           createElement(AgentReply, {
             messages,
             system: botCtx.agent.systemPrompt,
-            tools: coordinatorTools,
+            // Provider-/gateway-executed tools (e.g. web search) are registered at startup and merged in
+            // per turn, so they reach the coordinator regardless of registration vs. setup ordering.
+            tools: { ...coordinatorTools, ...getProviderTools() },
             hiddenTools,
             describeTool,
             model: chatConfig.model,

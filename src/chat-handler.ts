@@ -11,6 +11,7 @@ import { z } from "zod";
 import { runAgent } from "./agent";
 import { getBotContext } from "./als";
 import type { RequestSource } from "./config";
+import { getProviderTools } from "./provider-tools";
 import type { ToolDefinition } from "./tool";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -151,10 +152,12 @@ export function createChatHandler(options: ChatOptions) {
   const system = options.systemPrompt;
   const source: RequestSource = options.source ?? "json";
   const field = options.field ?? "message";
-  const tools = buildToolSet(options.tools, invoke);
+  const baseTools = buildToolSet(options.tools, invoke);
 
   return defineEventHandler(async (event) => {
     const prompt = await readPrompt(event, source, field);
+    // Provider-/gateway-executed tools (e.g. web search) are registered at startup; merge per request.
+    const tools = { ...baseTools, ...getProviderTools() };
     const result = await runAgent({ prompt, tools, model, systemPrompt: system, maxSteps });
     const response: ChatResponse = { text: result.text, steps: result.steps };
     return response;
