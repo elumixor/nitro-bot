@@ -5,6 +5,34 @@ import { type DiscoveredRoute, discoverToolRoutes, type RouteParam } from "./dis
 
 type NitroModuleHooks = { hook: (name: string, fn: () => void | Promise<void>) => void };
 
+/** What file tracing may be told to skip: globs, or a predicate over a file's path. */
+type TraceIgnore = string | string[] | ((path: string) => boolean);
+
+/** A file of a package only the route scan uses, at build time; a deployed server never runs it. */
+const BUILD_ONLY_FILE = /[\\/]node_modules[\\/]@?ts-morph[\\/]/;
+/**
+ * The same packages as globs, for when the app already ignores by glob. `**` does not cross a
+ * dot-directory, so the stores package managers keep under one (`.bun`, `.pnpm`) are spelled out.
+ */
+const BUILD_ONLY_GLOBS = ["", ".bun/**/node_modules/", ".pnpm/**/node_modules/"].flatMap((store) =>
+  ["ts-morph", "@ts-morph"].map((name) => `**/node_modules/${store}${name}/**`),
+);
+
+/**
+ * Keep the build-only packages out of the server Nitro assembles. They are reachable from this
+ * package's entry (through the scan's lazy import), so tracing would otherwise copy the TypeScript
+ * compiler into every deployment.
+ */
+function leaveOutBuildOnlyPackages(nitro: NitroLike): void {
+  nitro.options.externals ??= {};
+  nitro.options.externals.traceOptions ??= {};
+  const traceOptions = nitro.options.externals.traceOptions;
+  const existing = traceOptions.ignore;
+  if (existing === undefined) traceOptions.ignore = (path) => BUILD_ONLY_FILE.test(path);
+  else if (typeof existing === "function") traceOptions.ignore = (path) => existing(path) || BUILD_ONLY_FILE.test(path);
+  else traceOptions.ignore = [...[existing].flat(), ...BUILD_ONLY_GLOBS];
+}
+
 type NitroLike = {
   options: {
     rootDir: string;
@@ -13,6 +41,7 @@ type NitroLike = {
     handlers: Array<{ route: string; method?: string; handler: string }>;
     plugins: string[];
     alias: Record<string, string>;
+    externals?: { traceOptions?: { ignore?: TraceIgnore } };
   };
   hooks: NitroModuleHooks;
 };
@@ -36,6 +65,8 @@ export default function nitroBotModule(config: NitroBotModuleOptions = {}) {
     const buildDir = resolve(rootDir, ".nitro-bot");
     const routesDir = resolve(srcDir, "routes");
     const botsDir = resolve(rootDir, config.botsDir ?? "src/bots");
+
+    leaveOutBuildOnlyPackages(nitro);
 
     const routes = await discoverToolRoutes(routesDir);
     if (routes.length === 0) {

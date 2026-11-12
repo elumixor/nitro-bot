@@ -2,7 +2,6 @@ import { n as runAgentEventStream, d as buildToolSet, g as defaultInvoke } from 
 export { a as botTool, c as buildBotToolSet, e as createChatHandler, f as createSessionChatHandler, h as getBot, i as getBotContext, j as isBotToolDefinition, m as makeToolLabeler, k as registerBot, l as runAgent, o as runAgentStream, p as sendFileBuiltin } from './shared/nitro-bot.CfWfC6yH.mjs';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
-import { Project, Node, SyntaxKind } from 'ts-morph';
 import 'zod';
 import 'ai';
 import 'h3';
@@ -29,6 +28,7 @@ function resolveChatConfig(config) {
   return { ...DEFAULT_CONFIG, ...config ?? {} };
 }
 
+let tsMorph;
 const METHOD_NAMES = ["get", "post", "put", "delete", "patch"];
 const METHOD_SET = new Set(METHOD_NAMES);
 async function discoverToolRoutes(routesDir) {
@@ -41,7 +41,8 @@ async function discoverToolRoutes(routesDir) {
     if (route) candidates.push({ ...route, absPath });
   }
   if (candidates.length === 0) return [];
-  const project = new Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: false });
+  tsMorph ??= await import('ts-morph');
+  const project = new tsMorph.Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: false });
   const results = candidates.map((candidate) => ({
     ...candidate,
     params: paramsFromPath(candidate.path),
@@ -101,9 +102,9 @@ function extractHandlerSchema(project, absPath) {
   const exportAssign = sourceFile.getExportAssignment((assign) => !assign.isExportEquals());
   if (!exportAssign) return void 0;
   const expression = unwrapCall(exportAssign.getExpression());
-  if (!Node.isCallExpression(expression)) return void 0;
+  if (!tsMorph.Node.isCallExpression(expression)) return void 0;
   const firstArg = expression.getArguments()[0];
-  if (!firstArg || !Node.isObjectLiteralExpression(firstArg)) return void 0;
+  if (!firstArg || !tsMorph.Node.isObjectLiteralExpression(firstArg)) return void 0;
   const bodyProp = firstArg.getProperty("body");
   const queryProp = firstArg.getProperty("query");
   const importMap = buildImportMap(sourceFile);
@@ -118,10 +119,10 @@ function extractHandlerSchema(project, absPath) {
   return { bodyText, queryText, imports: imports.length > 0 ? imports : void 0 };
 }
 function getInitializer(prop) {
-  return prop && Node.isPropertyAssignment(prop) ? prop.getInitializer() : void 0;
+  return prop && tsMorph.Node.isPropertyAssignment(prop) ? prop.getInitializer() : void 0;
 }
 function resolveSchemaNode(node, sourceFile, importMap) {
-  if (!node || !Node.isIdentifier(node)) return node;
+  if (!node || !tsMorph.Node.isIdentifier(node)) return node;
   const name = node.getText();
   if (importMap.has(name)) return node;
   const initializer = sourceFile.getVariableDeclaration(name)?.getInitializer();
@@ -146,8 +147,8 @@ function collectSchemaImports(sourceFile, nodes, absPath) {
   const importMap = buildImportMap(sourceFile);
   const found = /* @__PURE__ */ new Map();
   for (const node of nodes) {
-    const identifiers = node.getDescendantsOfKind(SyntaxKind.Identifier);
-    if (Node.isIdentifier(node)) identifiers.unshift(node);
+    const identifiers = node.getDescendantsOfKind(tsMorph.SyntaxKind.Identifier);
+    if (tsMorph.Node.isIdentifier(node)) identifiers.unshift(node);
     for (const identifier of identifiers) {
       const name = identifier.getText();
       if (name === "z" || found.has(name)) continue;
@@ -165,10 +166,23 @@ function referencesDefinition(text) {
 }
 function unwrapCall(expression) {
   let current = expression;
-  while (current && Node.isAsExpression(current)) current = current.getExpression();
+  while (current && tsMorph.Node.isAsExpression(current)) current = current.getExpression();
   return current;
 }
 
+const BUILD_ONLY_FILE = /[\\/]node_modules[\\/]@?ts-morph[\\/]/;
+const BUILD_ONLY_GLOBS = ["", ".bun/**/node_modules/", ".pnpm/**/node_modules/"].flatMap(
+  (store) => ["ts-morph", "@ts-morph"].map((name) => `**/node_modules/${store}${name}/**`)
+);
+function leaveOutBuildOnlyPackages(nitro) {
+  nitro.options.externals ??= {};
+  nitro.options.externals.traceOptions ??= {};
+  const traceOptions = nitro.options.externals.traceOptions;
+  const existing = traceOptions.ignore;
+  if (existing === void 0) traceOptions.ignore = (path) => BUILD_ONLY_FILE.test(path);
+  else if (typeof existing === "function") traceOptions.ignore = (path) => existing(path) || BUILD_ONLY_FILE.test(path);
+  else traceOptions.ignore = [...[existing].flat(), ...BUILD_ONLY_GLOBS];
+}
 function nitroBotModule(config = {}) {
   return async (nitro) => {
     const rootDir = nitro.options.rootDir;
@@ -176,6 +190,7 @@ function nitroBotModule(config = {}) {
     const buildDir = resolve(rootDir, ".nitro-bot");
     const routesDir = resolve(srcDir, "routes");
     const botsDir = resolve(rootDir, config.botsDir ?? "src/bots");
+    leaveOutBuildOnlyPackages(nitro);
     const routes = await discoverToolRoutes(routesDir);
     if (routes.length === 0) {
       console.warn("[nitro-bot] No tool routes with `export const definition = tool(...)` found in", routesDir);

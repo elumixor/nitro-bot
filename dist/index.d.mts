@@ -50,6 +50,8 @@ declare function discoverToolRoutes(routesDir: string): Promise<DiscoveredRoute[
 type NitroModuleHooks = {
     hook: (name: string, fn: () => void | Promise<void>) => void;
 };
+/** What file tracing may be told to skip: globs, or a predicate over a file's path. */
+type TraceIgnore = string | string[] | ((path: string) => boolean);
 type NitroLike = {
     options: {
         rootDir: string;
@@ -62,6 +64,11 @@ type NitroLike = {
         }>;
         plugins: string[];
         alias: Record<string, string>;
+        externals?: {
+            traceOptions?: {
+                ignore?: TraceIgnore;
+            };
+        };
     };
     hooks: NitroModuleHooks;
 };

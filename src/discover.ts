@@ -1,7 +1,14 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { Node, Project, type PropertyAssignment, SyntaxKind } from "ts-morph";
+import type { Node, Project, PropertyAssignment } from "ts-morph";
 import type { HttpMethod } from "./chat-handler";
+
+/**
+ * ts-morph brings the whole TypeScript compiler with it, and only this scan (run by the Nitro module
+ * while it builds) needs it. It is loaded on the first scan rather than imported at the top, so a
+ * server that imports this package for its runtime helpers never loads a compiler at start.
+ */
+let tsMorph: typeof import("ts-morph");
 
 const METHOD_NAMES = ["get", "post", "put", "delete", "patch"] as const;
 const METHOD_SET = new Set<string>(METHOD_NAMES);
@@ -46,7 +53,8 @@ export async function discoverToolRoutes(routesDir: string): Promise<DiscoveredR
 
   if (candidates.length === 0) return [];
 
-  const project = new Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: false });
+  tsMorph ??= await import("ts-morph");
+  const project = new tsMorph.Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: false });
   const results: DiscoveredRoute[] = candidates.map((candidate) => ({
     ...candidate,
     params: paramsFromPath(candidate.path),
@@ -118,10 +126,10 @@ function extractHandlerSchema(project: Project, absPath: string): ExtractedSchem
   if (!exportAssign) return undefined;
 
   const expression = unwrapCall(exportAssign.getExpression());
-  if (!Node.isCallExpression(expression)) return undefined;
+  if (!tsMorph.Node.isCallExpression(expression)) return undefined;
 
   const firstArg = expression.getArguments()[0];
-  if (!firstArg || !Node.isObjectLiteralExpression(firstArg)) return undefined;
+  if (!firstArg || !tsMorph.Node.isObjectLiteralExpression(firstArg)) return undefined;
 
   const bodyProp = firstArg.getProperty("body");
   const queryProp = firstArg.getProperty("query");
@@ -150,7 +158,7 @@ function extractHandlerSchema(project: Project, absPath: string): ExtractedSchem
 }
 
 function getInitializer(prop: Node | undefined): Node | undefined {
-  return prop && Node.isPropertyAssignment(prop) ? (prop as PropertyAssignment).getInitializer() : undefined;
+  return prop && tsMorph.Node.isPropertyAssignment(prop) ? (prop as PropertyAssignment).getInitializer() : undefined;
 }
 
 /** Inline a bare identifier that resolves to a local variable so the generated handler is self-contained. */
@@ -159,7 +167,7 @@ function resolveSchemaNode(
   sourceFile: ReturnType<Project["addSourceFileAtPath"]>,
   importMap: Map<string, string>,
 ): Node | undefined {
-  if (!node || !Node.isIdentifier(node)) return node;
+  if (!node || !tsMorph.Node.isIdentifier(node)) return node;
   const name = node.getText();
   if (importMap.has(name)) return node; // imported — re-emitted by collectSchemaImports
   const initializer = sourceFile.getVariableDeclaration(name)?.getInitializer();
@@ -196,8 +204,8 @@ function collectSchemaImports(
     // (`body: customerSchema`) — as opposed to a member access (`schema.shape`)
     // or object literal — would contribute no identifiers and its import would be
     // dropped, leaving a ReferenceError in the generated handler. Include the node.
-    const identifiers = node.getDescendantsOfKind(SyntaxKind.Identifier);
-    if (Node.isIdentifier(node)) identifiers.unshift(node);
+    const identifiers = node.getDescendantsOfKind(tsMorph.SyntaxKind.Identifier);
+    if (tsMorph.Node.isIdentifier(node)) identifiers.unshift(node);
     for (const identifier of identifiers) {
       const name = identifier.getText();
       // `z` is always imported by the generated handler; skip it and anything already collected.
@@ -218,6 +226,6 @@ function referencesDefinition(text: string | undefined): boolean {
 
 function unwrapCall(expression: Node | undefined): Node | undefined {
   let current: Node | undefined = expression;
-  while (current && Node.isAsExpression(current)) current = current.getExpression();
+  while (current && tsMorph.Node.isAsExpression(current)) current = current.getExpression();
   return current;
 }
