@@ -44,9 +44,18 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Check if version has been updated
+      # Publish whenever npm does not have this version yet. Asking the registry, rather than
+      # looking for a version change in the pushed commits, also works when the release commit
+      # reached the remote before its tag did.
+      - name: Check if this version is already on npm
         id: check
-        uses: EndBug/version-check@v3
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@elumixor/nitro-bot@$VERSION" version >/dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - run: bun install
         if: steps.check.outputs.changed == 'true'
@@ -57,5 +66,5 @@ jobs:
       - run: npm publish --access public
         if: steps.check.outputs.changed == 'true'
 
-      - run: 'echo "Package version has not been updated, skipping publish"'
+      - run: 'echo "This version is already on npm, skipping publish"'
         if: steps.check.outputs.changed == 'false'

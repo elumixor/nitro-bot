@@ -25,9 +25,9 @@
     "lint": "tsc --noEmit && biome check src",
     "test": "bun test src",
     "format": "biome format --write src",
-    "release:patch": "npm version patch -m \"Release v%s\" && git push --tags",
-    "release:minor": "npm version minor -m \"Release v%s\" && git push --tags",
-    "release:major": "npm version major -m \"Release v%s\" && git push --tags"
+    "release:patch": "npm version patch -m \"Release v%s\" && git push --follow-tags",
+    "release:minor": "npm version minor -m \"Release v%s\" && git push --follow-tags",
+    "release:major": "npm version major -m \"Release v%s\" && git push --follow-tags"
   },
   "dependencies": {
     "jiti": "^2.7.0",
